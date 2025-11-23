@@ -55,7 +55,7 @@ function FoldedPaper({ headline, subhead, countryName }) {
         color="#1a1a1a"
         anchorX="center"
         anchorY="middle"
-        font="./fonts/PlayfairDisplay-Regular.woff"
+        font="./fonts/PlayfairDisplay-Regular.ttf"
         textAlign="center"
       >
         THE GLOBAL TIMES
@@ -72,7 +72,7 @@ function FoldedPaper({ headline, subhead, countryName }) {
         textAlign="center"
         anchorX="center"
         anchorY="top"
-        font="./fonts/Merriweather-Regular.woff"
+        font="./fonts/Merriweather-Regular.ttf"
       >
         SPECIAL REPORT: {countryName ? countryName.toUpperCase() : "WORLD"}
       </Text>
@@ -82,7 +82,7 @@ function FoldedPaper({ headline, subhead, countryName }) {
         color="#666"
         anchorX="center"
         anchorY="bottom"
-        font="./fonts/Merriweather-Regular.woff"
+        font="./fonts/Merriweather-Regular.ttf"
       >
         {dateString} • VOL. CCLIV
       </Text>
@@ -97,7 +97,7 @@ function FoldedPaper({ headline, subhead, countryName }) {
             color="#666"
             anchorX="center"
             anchorY="top"
-            font="./fonts/Merriweather-Regular.woff"
+            font="./fonts/Merriweather-Regular.ttf"
         >
             ANALYSIS
         </Text>
@@ -110,7 +110,7 @@ function FoldedPaper({ headline, subhead, countryName }) {
             anchorX="center"
             anchorY="top"
             lineHeight={1.2}
-            font="./fonts/PlayfairDisplay-Regular.woff"
+            font="./fonts/PlayfairDisplay-Regular.ttf"
         >
             {headline || "Global Trends Analysis"}
         </Text>
@@ -122,7 +122,7 @@ function FoldedPaper({ headline, subhead, countryName }) {
             textAlign="center"
             anchorX="center"
             anchorY="top"
-            font="./fonts/Merriweather-Regular.woff"
+            font="./fonts/Merriweather-Regular.ttf"
             lineHeight={1.4}
         >
             {subhead || "Data reveals shifting patterns in international discourse."}
@@ -132,7 +132,7 @@ function FoldedPaper({ headline, subhead, countryName }) {
                 <planeGeometry args={[2.4, 1.2]} />
                 <meshStandardMaterial color="#e5e5e5" />
             </mesh>
-            <Text position={[0, 0, 0.01]} fontSize={0.1} color="#999" font="./fonts/Merriweather-Regular.woff">
+            <Text position={[0, 0, 0.01]} fontSize={0.1} color="#999" font="./fonts/Merriweather-Regular.ttf">
                 [Data Visualization]
             </Text>
         </group>
@@ -147,23 +147,23 @@ function FoldedPaper({ headline, subhead, countryName }) {
             color="#666"
             anchorX="center"
             anchorY="top"
-            font="./fonts/Merriweather-Regular.woff"
+            font="./fonts/Merriweather-Regular.ttf"
         >
             MARKET WATCH
         </Text>
         <group position={[0, 1.4, 0]}>
-            <Text position={[-0.8, 0, 0]} fontSize={0.09} color="#222" maxWidth={0.9} textAlign="justify" anchorX="center" anchorY="top" font="./fonts/Merriweather-Regular.woff">
+            <Text position={[-0.8, 0, 0]} fontSize={0.09} color="#222" maxWidth={0.9} textAlign="justify" anchorX="center" anchorY="top" font="./fonts/Merriweather-Regular.ttf">
                 "The interconnectedness of global media narratives has reached unprecedented levels, as shown by recent data."
             </Text>
-            <Text position={[0.8, 0, 0]} fontSize={0.09} color="#222" maxWidth={0.9} textAlign="justify" anchorX="center" anchorY="top" font="./fonts/Merriweather-Regular.woff">
+            <Text position={[0.8, 0, 0]} fontSize={0.09} color="#222" maxWidth={0.9} textAlign="justify" anchorX="center" anchorY="top" font="./fonts/Merriweather-Regular.ttf">
                 "Observers note that while some nations dominate the conversation, emerging voices are reshaping the landscape."
             </Text>
         </group>
         <group position={[0, 0, 0]}>
-             <Text position={[-0.8, 0, 0]} fontSize={0.09} color="#222" maxWidth={0.9} textAlign="justify" anchorX="center" anchorY="top" font="./fonts/Merriweather-Regular.woff">
+             <Text position={[-0.8, 0, 0]} fontSize={0.09} color="#222" maxWidth={0.9} textAlign="justify" anchorX="center" anchorY="top" font="./fonts/Merriweather-Regular.ttf">
                 Lorum ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
             </Text>
-            <Text position={[0.8, 0, 0]} fontSize={0.09} color="#222" maxWidth={0.9} textAlign="justify" anchorX="center" anchorY="top" font="./fonts/Merriweather-Regular.woff">
+            <Text position={[0.8, 0, 0]} fontSize={0.09} color="#222" maxWidth={0.9} textAlign="justify" anchorX="center" anchorY="top" font="./fonts/Merriweather-Regular.ttf">
                 Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.
             </Text>
         </group>
