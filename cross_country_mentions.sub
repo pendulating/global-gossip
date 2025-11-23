@@ -1,0 +1,27 @@
+#!/bin/bash
+
+#SBATCH --job-name=UAIR-cross-country
+#SBATCH --partition=pierson
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=128GB
+#SBATCH --time=72:00:00
+#SBATCH --open-mode=append
+#SBATCH --output=/share/pierson/matt/UAIR/.slurm_jobs/cross_country_mentions/%j.out
+#SBATCH --error=/share/pierson/matt/UAIR/.slurm_jobs/cross_country_mentions/%j.err
+
+set -euo pipefail
+
+mkdir -p /share/pierson/matt/UAIR/.slurm_jobs/cross_country_mentions
+
+source ~/.bashrc
+source /share/pierson/matt/UAIR/.venv/bin/activate
+
+cd /share/pierson/matt/UAIR
+
+python /share/pierson/matt/UAIR/viz/longitudinal_flat_world/prepare_cross_country_mentions.py \
+  --input /share/pierson/matt/UAIR/outputs/for_nov10workshop_joint_results/classify_all.parquet \
+  --output-dir /share/pierson/matt/UAIR/outputs/derived \
+  --json-path /share/pierson/matt/UAIR/viz/longitudinal_flat_world/public/cross_country_mentions_by_year.json
+
