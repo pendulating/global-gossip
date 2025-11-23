@@ -433,57 +433,6 @@ export default function App() {
   const colorFromShareRatio = ratio => {
     if (!Number.isFinite(ratio)) return BLUE_COLOR; // Default fallback
     
-    // Logic: 
-    // ratio = Ego Mentions / Partner Mentions
-    // If ratio > 1.5 -> Ego talks more -> Blue
-    // If ratio < (1/1.5) = 0.66 -> Partner talks more -> Orange
-    // Otherwise -> Roughly equal -> Purple
-    
-    // Note: The 'ratio' passed in here comes from visibleRows which computes:
-    // const ratio = activeCount / Math.max(otherCount, 1);
-    // And it also swaps active/other based on winner.
-    // So 'ratio' in visibleRows is ALWAYS >= 1.0 (Dominant / Weaker).
-    
-    // We need to check if that dominant ratio is effectively "equal".
-    // Threshold: < 1.5
-    
-    if (ratio < 1.5) {
-        return PURPLE_COLOR;
-    }
-    
-    // If we are here, ratio >= 1.5, meaning there is a clear dominant direction.
-    // In visibleRows, we determine direction.
-    // But this function just takes 'ratio'.
-    // Wait, 'colorFromShareRatio' is called in ArcLayer with 'd.ratio'.
-    // And 'd.ratio' is Dominant/Weaker.
-    // BUT we need to know WHICH one is dominant to assign Blue vs Orange?
-    // Actually, ArcLayer uses:
-    // getSourceColor: d => [...colorFromShareRatio(d.ratio), ARC_FIXED_ALPHA]
-    
-    // The previous logic was mixing colors based on ratio.
-    // The previous logic used 'ratio' as a float where:
-    // If > 1: Mix Brown -> Blue
-    // If < 1: Mix Orange -> Brown (but ratio was clamped to 0)
-    
-    // However, looking at visibleRows:
-    // const ratio = activeCount / Math.max(otherCount, 1);
-    // This ratio is ALWAYS >= 0. If active > other, ratio > 1. If active < other, ratio < 1.
-    
-    // Wait, let's re-read visibleRows logic carefully:
-    /*
-      const ratio = activeCount / Math.max(otherCount, 1);
-      const sourceIso = winnerIsActive ? activeIso : otherIso;
-    */
-    // 'ratio' here is (Active Count) / (Other Count).
-    // So:
-    // If Active (Ego) > Other -> Ratio > 1.0 -> Blue-ish
-    // If Active (Ego) < Other -> Ratio < 1.0 -> Orange-ish
-    
-    // New Logic with Threshold 1.5 (and 1/1.5 = 0.666):
-    // Ratio > 1.5 => Ego Dominant => BLUE
-    // Ratio < 0.666 => Other Dominant => ORANGE
-    // 0.666 <= Ratio <= 1.5 => Equal => PURPLE
-    
     if (ratio > 1.5) return BLUE_COLOR;
     if (ratio < 0.6666) return ORANGE_COLOR;
     return PURPLE_COLOR;
