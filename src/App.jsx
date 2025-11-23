@@ -403,16 +403,66 @@ export default function App() {
     Math.round(c1[1] + (c2[1] - c1[1]) * t),
     Math.round(c1[2] + (c2[2] - c1[2]) * t)
   ];
+  
+  const PURPLE_COLOR = [147, 51, 234]; // Purple for roughly equal coverage
 
   const colorFromShareRatio = ratio => {
-    if (!Number.isFinite(ratio)) ratio = 10;
-    if (ratio >= 1) {
-      const clamped = Math.min(ratio, 10);
-      const t = (clamped - 1) / 9;
-      return mixColors(BROWN_COLOR, BLUE_COLOR, t);
+    if (!Number.isFinite(ratio)) return BLUE_COLOR; // Default fallback
+    
+    // Logic: 
+    // ratio = Ego Mentions / Partner Mentions
+    // If ratio > 1.5 -> Ego talks more -> Blue
+    // If ratio < (1/1.5) = 0.66 -> Partner talks more -> Orange
+    // Otherwise -> Roughly equal -> Purple
+    
+    // Note: The 'ratio' passed in here comes from visibleRows which computes:
+    // const ratio = activeCount / Math.max(otherCount, 1);
+    // And it also swaps active/other based on winner.
+    // So 'ratio' in visibleRows is ALWAYS >= 1.0 (Dominant / Weaker).
+    
+    // We need to check if that dominant ratio is effectively "equal".
+    // Threshold: < 1.5
+    
+    if (ratio < 1.5) {
+        return PURPLE_COLOR;
     }
-    const clamped = Math.max(ratio, 0);
-    return mixColors(ORANGE_COLOR, BROWN_COLOR, clamped);
+    
+    // If we are here, ratio >= 1.5, meaning there is a clear dominant direction.
+    // In visibleRows, we determine direction.
+    // But this function just takes 'ratio'.
+    // Wait, 'colorFromShareRatio' is called in ArcLayer with 'd.ratio'.
+    // And 'd.ratio' is Dominant/Weaker.
+    // BUT we need to know WHICH one is dominant to assign Blue vs Orange?
+    // Actually, ArcLayer uses:
+    // getSourceColor: d => [...colorFromShareRatio(d.ratio), ARC_FIXED_ALPHA]
+    
+    // The previous logic was mixing colors based on ratio.
+    // The previous logic used 'ratio' as a float where:
+    // If > 1: Mix Brown -> Blue
+    // If < 1: Mix Orange -> Brown (but ratio was clamped to 0)
+    
+    // However, looking at visibleRows:
+    // const ratio = activeCount / Math.max(otherCount, 1);
+    // This ratio is ALWAYS >= 0. If active > other, ratio > 1. If active < other, ratio < 1.
+    
+    // Wait, let's re-read visibleRows logic carefully:
+    /*
+      const ratio = activeCount / Math.max(otherCount, 1);
+      const sourceIso = winnerIsActive ? activeIso : otherIso;
+    */
+    // 'ratio' here is (Active Count) / (Other Count).
+    // So:
+    // If Active (Ego) > Other -> Ratio > 1.0 -> Blue-ish
+    // If Active (Ego) < Other -> Ratio < 1.0 -> Orange-ish
+    
+    // New Logic with Threshold 1.5 (and 1/1.5 = 0.666):
+    // Ratio > 1.5 => Ego Dominant => BLUE
+    // Ratio < 0.666 => Other Dominant => ORANGE
+    // 0.666 <= Ratio <= 1.5 => Equal => PURPLE
+    
+    if (ratio > 1.5) return BLUE_COLOR;
+    if (ratio < 0.6666) return ORANGE_COLOR;
+    return PURPLE_COLOR;
   };
 
   const arcLayer = useMemo(() => {
@@ -613,6 +663,7 @@ export default function App() {
     if (!activeIso) return null;
     const blue = [];
     const orange = [];
+    const purple = []; // New category for equal coverage
     for (const row of visibleRows) {
       const isOutbound = row.direction === 'outbound';
       const partnerIso = isOutbound ? row.target_country : row.source_country;
@@ -624,20 +675,26 @@ export default function App() {
       const egoToPartner = isOutbound ? row.mention_occurrences : row.counterpart_mentions;
       const partnerToEgo = isOutbound ? row.counterpart_mentions : row.mention_occurrences;
       
+      const ratio = egoToPartner / Math.max(partnerToEgo, 1);
+      const isPurple = ratio >= 0.6666 && ratio <= 1.5;
+
       const item = {
         iso: partnerIso,
         name: partnerName,
         egoToPartner,
         partnerToEgo,
-        total: egoToPartner + partnerToEgo
+        total: egoToPartner + partnerToEgo,
+        isPurple
       };
 
-      if (isOutbound) blue.push(item);
+      if (isPurple) purple.push(item);
+      else if (isOutbound) blue.push(item);
       else orange.push(item);
     }
     return {
       blue: blue.sort((a, b) => b.egoToPartner - a.egoToPartner).slice(0, 20),
-      orange: orange.sort((a, b) => b.partnerToEgo - a.partnerToEgo).slice(0, 20)
+      orange: orange.sort((a, b) => b.partnerToEgo - a.partnerToEgo).slice(0, 20),
+      purple: purple.sort((a, b) => b.total - a.total).slice(0, 20)
     };
   }, [activeIso, visibleRows]);
 
@@ -926,7 +983,7 @@ export default function App() {
                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#4494ff' }} />
                    <div style={{ fontSize: 13, fontWeight: 600, color: '#bfdbfe' }}>
-                     Top Outbound Mentions
+                     Ego Talks More
                    </div>
                  </div>
                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -962,12 +1019,53 @@ export default function App() {
               </div>
             )}
 
+            {leaderboardData.purple.length > 0 && (
+              <div style={{ marginTop: 20 }}>
+                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                   <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#9333ea' }} />
+                   <div style={{ fontSize: 13, fontWeight: 600, color: '#d8b4fe' }}>
+                     Roughly Equal Coverage
+                   </div>
+                 </div>
+                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                   {leaderboardData.purple.map(item => (
+                     <div key={item.iso} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+                       {/* Ego Flag (Small) */}
+                       {activeIso.length === 2 && (
+                         <img src={`https://flagcdn.com/w20/${activeIso.toLowerCase()}.png`} alt={activeIso} style={{ width: 20, height: 14, borderRadius: 2, objectFit: 'cover', opacity: 0.8 }} />
+                       )}
+                       
+                       {/* Bar */}
+                       <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                           <div style={{ display: 'flex', height: 6, borderRadius: 3, overflow: 'hidden', background: 'rgba(255,255,255,0.1)' }}>
+                               <div style={{ flex: item.egoToPartner, background: '#9333ea' }} />
+                               <div style={{ flex: item.partnerToEgo, background: '#9333ea' }} />
+                           </div>
+                           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, marginTop: 2, color: '#94a3b8', lineHeight: 1 }}>
+                               <span style={{ color: '#d8b4fe' }}>{item.egoToPartner.toLocaleString()}</span>
+                               <span style={{ color: '#d8b4fe' }}>{item.partnerToEgo.toLocaleString()}</span>
+                           </div>
+                       </div>
+
+                       {/* Target Info */}
+                       <div style={{ width: 80, display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
+                           <div style={{ fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'right', maxWidth: 50 }}>{item.name}</div>
+                           {item.iso.length === 2 && (
+                             <img src={`https://flagcdn.com/w20/${item.iso.toLowerCase()}.png`} alt={item.iso} style={{ width: 20, height: 14, borderRadius: 2, objectFit: 'cover' }} />
+                           )}
+                       </div>
+                     </div>
+                   ))}
+                 </div>
+              </div>
+            )}
+
             {leaderboardData.orange.length > 0 && (
               <div style={{ marginTop: 20 }}>
                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#f97316' }} />
                    <div style={{ fontSize: 13, fontWeight: 600, color: '#fdba74' }}>
-                     Top Inbound Mentions
+                     Target Talks More
                    </div>
                  </div>
                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -1003,7 +1101,7 @@ export default function App() {
               </div>
             )}
 
-            {!leaderboardData.blue.length && !leaderboardData.orange.length && (
+            {!leaderboardData.blue.length && !leaderboardData.purple.length && !leaderboardData.orange.length && (
               <div style={{ padding: 20, textAlign: 'center', color: '#64748b', fontSize: 13 }}>
                 No relationships found meeting the current criteria.
               </div>
@@ -1103,11 +1201,15 @@ export default function App() {
         <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span style={{ width: 18, height: 6, borderRadius: 9999, background: 'linear-gradient(90deg, rgba(249,115,22,0.4), rgba(249,115,22,1))' }} />
-            <span style={{ fontSize: 12, color: '#cbd5e1' }}>Ego is talked about more (orange)</span>
+            <span style={{ fontSize: 12, color: '#cbd5e1' }}>Target talks more</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ width: 18, height: 6, borderRadius: 9999, background: 'linear-gradient(90deg, rgba(147,51,234,0.4), rgba(147,51,234,1))' }} />
+            <span style={{ fontSize: 12, color: '#cbd5e1' }}>Coverage roughly equal</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span style={{ width: 18, height: 6, borderRadius: 9999, background: 'linear-gradient(90deg, rgba(68,148,255,0.4), rgba(68,148,255,1))' }} />
-            <span style={{ fontSize: 12, color: '#cbd5e1' }}>Ego talks about target more (blue)</span>
+            <span style={{ fontSize: 12, color: '#cbd5e1' }}>Ego talks more</span>
           </div>
         </div>
       </div>
