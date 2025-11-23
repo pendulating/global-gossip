@@ -1,202 +1,207 @@
-import React, { useMemo } from 'react';
-import { Canvas } from '@react-three/fiber';
+import React, { useMemo, useState, useRef } from 'react';
+import { Canvas, useFrame } from '@react-three/fiber';
 import { Text, Environment, Float, ContactShadows } from '@react-three/drei';
 import * as THREE from 'three';
 
-function PaperSheet({ color = "#f4f1ea", position = [0, 0, 0], rotation = [0, 0, 0], scale = [1, 1, 1], children }) {
+function PaperSheet({ color = "#f4f1ea", position = [0, 0, 0], rotation = [0, 0, 0], scale = [1, 1, 1], frontContent, backContent }) {
   return (
     <group position={position} rotation={rotation} scale={scale}>
-      {/* Left Panel (Front) */}
-      <group position={[-1.38, 0, 0.58]} rotation={[0, 0.4, 0]}>
-        <mesh receiveShadow castShadow>
-          <boxGeometry args={[3, 4, 0.02]} />
-          <meshStandardMaterial color={color} roughness={0.9} metalness={0.05} />
-        </mesh>
-        {children && <group position={[0, 0, 0.02]}>{children}</group>}
-      </group>
-
-      {/* Right Panel (Back) */}
-      <group position={[1.38, 0, 0.58]} rotation={[0, -0.4, 0]}>
-        <mesh receiveShadow castShadow>
-          <boxGeometry args={[3, 4, 0.02]} />
-          <meshStandardMaterial color={color === "#f4f1ea" ? "#e8e5de" : color} roughness={0.9} metalness={0.05} />
-        </mesh>
-      </group>
+      <mesh receiveShadow castShadow>
+        <boxGeometry args={[3, 4, 0.02]} />
+        <meshStandardMaterial color={color} roughness={0.9} metalness={0.05} />
+      </mesh>
+      {frontContent && <group position={[0, 0, 0.02]}>{frontContent}</group>}
+      {backContent && (
+        <group position={[0, 0, -0.02]} rotation={[0, Math.PI, 0]}>
+          {backContent}
+        </group>
+      )}
     </group>
   );
 }
 
-function FoldedPaper({ headline, subhead }) {
-  // Get current date for the paper
+function FoldedPaper({ headline, subhead, countryName }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const groupRef = useRef();
+  const leftPanelRef = useRef();
+  
+  // Smooth animation state
+  useFrame((state, delta) => {
+    const easing = 4 * delta;
+    
+    // Left Panel Rotation: Closed (Math.PI - 0.3) vs Open (0.3)
+    const targetLeftRot = isOpen ? 0.15 : (Math.PI - 0.25);
+    leftPanelRef.current.rotation.y = THREE.MathUtils.lerp(leftPanelRef.current.rotation.y, targetLeftRot, easing);
+    
+    // Group Rotation: Center the view based on state
+    // Closed: Look at Spine/Cover (Rot Y ~ -1.5)
+    // Open: Look at Spread (Rot Y ~ 0)
+    const targetGroupRot = isOpen ? 0 : -1.5;
+    groupRef.current.rotation.y = THREE.MathUtils.lerp(groupRef.current.rotation.y, targetGroupRot, easing);
+  });
+
   const dateString = useMemo(() => {
     return new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
   }, []);
 
+  // --- Content Components ---
+
+  const CoverContent = (
+    <group>
+      <Text
+        position={[0, 1.2, 0]}
+        fontSize={0.35}
+        maxWidth={2.5}
+        color="#1a1a1a"
+        anchorX="center"
+        anchorY="middle"
+        font="./fonts/PlayfairDisplay-Regular.woff"
+        textAlign="center"
+      >
+        THE GLOBAL TIMES
+      </Text>
+      <mesh position={[0, 0.5, 0]}>
+        <planeGeometry args={[2.6, 0.01]} />
+        <meshBasicMaterial color="#1a1a1a" />
+      </mesh>
+      <Text
+        position={[0, 0, 0]}
+        fontSize={0.15}
+        maxWidth={2.6}
+        color="#4a4a4a"
+        textAlign="center"
+        anchorX="center"
+        anchorY="top"
+        font="./fonts/Merriweather-Regular.woff"
+      >
+        SPECIAL REPORT: {countryName ? countryName.toUpperCase() : "WORLD"}
+      </Text>
+      <Text
+        position={[0, -1.6, 0]}
+        fontSize={0.08}
+        color="#666"
+        anchorX="center"
+        anchorY="bottom"
+        font="./fonts/Merriweather-Regular.woff"
+      >
+        {dateString} • VOL. CCLIV
+      </Text>
+    </group>
+  );
+
+  const InsideLeftContent = (
+    <group>
+        <Text
+            position={[0, 1.8, 0]}
+            fontSize={0.12}
+            color="#666"
+            anchorX="center"
+            anchorY="top"
+            font="./fonts/Merriweather-Regular.woff"
+        >
+            ANALYSIS
+        </Text>
+        <Text
+            position={[0, 1.5, 0]}
+            fontSize={0.22}
+            maxWidth={2.6}
+            color="#1a1a1a"
+            textAlign="center"
+            anchorX="center"
+            anchorY="top"
+            lineHeight={1.2}
+            font="./fonts/PlayfairDisplay-Regular.woff"
+        >
+            {headline || "Global Trends Analysis"}
+        </Text>
+        <Text
+            position={[0, 0.8, 0]}
+            fontSize={0.11}
+            maxWidth={2.2}
+            color="#4a4a4a"
+            textAlign="center"
+            anchorX="center"
+            anchorY="top"
+            font="./fonts/Merriweather-Regular.woff"
+            lineHeight={1.4}
+        >
+            {subhead || "Data reveals shifting patterns in international discourse."}
+        </Text>
+        <group position={[0, -0.2, 0]}>
+            <mesh>
+                <planeGeometry args={[2.4, 1.2]} />
+                <meshStandardMaterial color="#e5e5e5" />
+            </mesh>
+            <Text position={[0, 0, 0.01]} fontSize={0.1} color="#999" font="./fonts/Merriweather-Regular.woff">
+                [Data Visualization]
+            </Text>
+        </group>
+    </group>
+  );
+
+  const InsideRightContent = (
+    <group>
+        <Text
+            position={[0, 1.8, 0]}
+            fontSize={0.12}
+            color="#666"
+            anchorX="center"
+            anchorY="top"
+            font="./fonts/Merriweather-Regular.woff"
+        >
+            MARKET WATCH
+        </Text>
+        <group position={[0, 1.4, 0]}>
+            <Text position={[-0.8, 0, 0]} fontSize={0.09} color="#222" maxWidth={0.9} textAlign="justify" anchorX="center" anchorY="top" font="./fonts/Merriweather-Regular.woff">
+                "The interconnectedness of global media narratives has reached unprecedented levels, as shown by recent data."
+            </Text>
+            <Text position={[0.8, 0, 0]} fontSize={0.09} color="#222" maxWidth={0.9} textAlign="justify" anchorX="center" anchorY="top" font="./fonts/Merriweather-Regular.woff">
+                "Observers note that while some nations dominate the conversation, emerging voices are reshaping the landscape."
+            </Text>
+        </group>
+        <group position={[0, 0, 0]}>
+             <Text position={[-0.8, 0, 0]} fontSize={0.09} color="#222" maxWidth={0.9} textAlign="justify" anchorX="center" anchorY="top" font="./fonts/Merriweather-Regular.woff">
+                Lorum ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
+            </Text>
+            <Text position={[0.8, 0, 0]} fontSize={0.09} color="#222" maxWidth={0.9} textAlign="justify" anchorX="center" anchorY="top" font="./fonts/Merriweather-Regular.woff">
+                Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.
+            </Text>
+        </group>
+    </group>
+  );
+
   return (
-    <group position={[0, -0.5, 0]} rotation={[-0.15, 0, 0]}>
+    <group 
+        position={[0, -0.5, 0]} 
+        rotation={[-0.1, 0, 0]} 
+        onClick={(e) => { e.stopPropagation(); setIsOpen(!isOpen); }}
+        onPointerOver={() => document.body.style.cursor = 'pointer'}
+        onPointerOut={() => document.body.style.cursor = 'auto'}
+    >
       <Float speed={2} rotationIntensity={0.05} floatIntensity={0.1}>
-        
-        <group rotation={[0, 0, 0]}>
-          {/* Inner Sheets (to create volume) */}
-          <PaperSheet position={[0, -0.01, -0.05]} scale={[0.99, 0.99, 0.99]} color="#e6e2d8" />
-          <PaperSheet position={[0, -0.02, -0.1]} scale={[0.98, 0.98, 0.98]} color="#dcd8ce" />
+        <group ref={groupRef}>
+          {/* Left Panel (Animated) */}
+          {/* Pivot point is 0,0,0. Panel is offset so its right edge is at 0 */}
+          <group ref={leftPanelRef} position={[0, 0, 0]} rotation={[0, Math.PI - 0.25, 0]}>
+             {/* The mesh itself needs to be offset to the LEFT of the pivot */}
+             <PaperSheet 
+                position={[-1.5, 0, 0]} // Center of left page is -1.5 from spine
+                frontContent={InsideLeftContent} 
+                backContent={CoverContent} 
+             />
+          </group>
 
-          {/* Main Sheet */}
-          <PaperSheet>
-            {/* Masthead */}
-            <Text
-              position={[0, 1.85, 0]}
-              fontSize={0.22}
-              maxWidth={2.8}
-              color="#1a1a1a"
-              anchorX="center"
-              anchorY="top"
-              font="./fonts/Merriweather-Regular.woff"
-              letterSpacing={0.05}
-            >
-              THE GLOBAL TIMES
-            </Text>
-            
-            {/* Date Line */}
-            <group position={[0, 1.68, 0]}>
-                <mesh position={[0, 0, 0]}>
-                    <planeGeometry args={[2.6, 0.005]} />
-                    <meshBasicMaterial color="#1a1a1a" />
-                </mesh>
-                <Text
-                    position={[-1.25, -0.06, 0]}
-                    fontSize={0.06}
-                    color="#4a4a4a"
-                    anchorX="left"
-                    anchorY="middle"
-                    font="./fonts/Merriweather-Regular.woff"
-                >
-                    {dateString}
-                </Text>
-                <Text
-                    position={[1.25, -0.06, 0]}
-                    fontSize={0.06}
-                    color="#4a4a4a"
-                    anchorX="right"
-                    anchorY="middle"
-                    font="./fonts/Merriweather-Regular.woff"
-                >
-                    VOL. CCLIV • NO. 128 • $3.00
-                </Text>
-                <mesh position={[0, -0.12, 0]}>
-                    <planeGeometry args={[2.6, 0.002]} />
-                    <meshBasicMaterial color="#ccc" />
-                </mesh>
-            </group>
-
-            {/* Headline */}
-            <Text
-              position={[0, 1.35, 0]}
-              fontSize={0.22}
-              maxWidth={2.6}
-              color="#1a1a1a"
-              textAlign="center"
-              anchorX="center"
-              anchorY="top"
-              lineHeight={1.1}
-              font="./fonts/Merriweather-Regular.woff"
-            >
-              {headline || "BREAKING NEWS"}
-            </Text>
-
-            {/* Subhead */}
-            <Text
-              position={[0, 0.95, 0]}
-              fontSize={0.11}
-              maxWidth={2.0}
-              color="#4a4a4a"
-              textAlign="center"
-              anchorX="center"
-              anchorY="top"
-              font="./fonts/Merriweather-Regular.woff"
-              lineHeight={1.4}
-            >
-              {subhead || "Global analysis reveals new trends in cross-border mentions."}
-            </Text>
-
-            {/* Main Image Placeholder */}
-            <group position={[0, 0.1, 0]}>
-                <mesh>
-                    <planeGeometry args={[2.4, 1.2]} />
-                    <meshStandardMaterial color="#ddd" roughness={0.6} />
-                </mesh>
-                <mesh position={[0, 0, 0.001]}>
-                     <planeGeometry args={[2.3, 1.1]} />
-                     <meshStandardMaterial color="#cdcdcd" roughness={0.8} />
-                </mesh>
-                {/* Image Caption */}
-                <Text
-                    position={[-1.15, -0.65, 0]}
-                    fontSize={0.06}
-                    maxWidth={2.3}
-                    color="#666"
-                    anchorX="left"
-                    anchorY="top"
-                    font="./fonts/Merriweather-Regular.woff"
-                    fontStyle="italic"
-                >
-                    Figure 1: Visualization of cross-border media attention.
-                </Text>
-            </group>
-
-            {/* Columns */}
-            <group position={[0, -0.9, 0]}>
-               {/* Column 1 */}
-               <Text
-                 position={[-0.85, 0, 0]}
-                 fontSize={0.07}
-                 maxWidth={0.8}
-                 color="#222"
-                 textAlign="justify"
-                 anchorX="center"
-                 anchorY="top"
-                 lineHeight={1.6}
-                 font="./fonts/Merriweather-Regular.woff"
-               >
-                 {"Lorum ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat."}
-               </Text>
-               
-               {/* Column 2 */}
-               <Text
-                 position={[0, 0, 0]}
-                 fontSize={0.07}
-                 maxWidth={0.8}
-                 color="#222"
-                 textAlign="justify"
-                 anchorX="center"
-                 anchorY="top"
-                 lineHeight={1.6}
-                 font="./fonts/Merriweather-Regular.woff"
-               >
-                 {"Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum."}
-               </Text>
-
-               {/* Column 3 */}
-               <Text
-                 position={[0.85, 0, 0]}
-                 fontSize={0.07}
-                 maxWidth={0.8}
-                 color="#222"
-                 textAlign="justify"
-                 anchorX="center"
-                 anchorY="top"
-                 lineHeight={1.6}
-                 font="./fonts/Merriweather-Regular.woff"
-               >
-                 {"Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo."}
-               </Text>
-            </group>
-          </PaperSheet>
-
+          {/* Right Panel (Static Base) */}
+          <group position={[0, 0, 0]} rotation={[0, -0.15, 0]}>
+             {/* The mesh needs to be offset to the RIGHT of the pivot */}
+             <PaperSheet 
+                position={[1.5, 0, 0]} // Center of right page is +1.5 from spine
+                frontContent={InsideRightContent}
+             />
+          </group>
         </group>
       </Float>
       
-      {/* Contact Shadow for grounding */}
       <ContactShadows 
         opacity={0.4} 
         scale={10} 
@@ -219,14 +224,14 @@ export default function NewspaperOverlay({ headline, subhead, countryName }) {
       transform: 'translateX(-50%)', 
       width: '800px', 
       height: '600px', 
-      pointerEvents: 'none', 
+      pointerEvents: 'auto', // Enable interaction
       zIndex: 50
     }}>
       <Canvas camera={{ position: [0, 0, 9], fov: 35 }}>
         <ambientLight intensity={0.9} />
         <spotLight position={[5, 5, 5]} angle={0.3} penumbra={0.5} intensity={1} castShadow />
         <pointLight position={[-5, 0, 5]} intensity={0.5} />
-        <FoldedPaper headline={headline} subhead={subhead} />
+        <FoldedPaper headline={headline} subhead={subhead} countryName={countryName} />
         <Environment preset="city" />
       </Canvas>
     </div>
