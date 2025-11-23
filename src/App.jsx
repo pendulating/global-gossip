@@ -616,7 +616,7 @@ export default function App() {
   const deckTooltip = ({ object, layer }) => {
     if (!object || layer?.id !== 'net-arcs') return null;
     const sharePct = ((object.mention_share || 0) * 100).toFixed(2);
-    const ratio = object.ratio ? (object.ratio * 10).toFixed(2) : '—';
+    const ratio = object.ratio ? object.ratio.toFixed(2) : '—';
     const directionLabel = object.direction === 'inbound' ? 'Inbound (others → ego)' : 'Outbound (ego → others)';
     return {
       html: `
@@ -627,7 +627,7 @@ export default function App() {
         <div class="tooltip-row"><span class="tooltip-label">Counter mentions:</span><span class="tooltip-value">${Number(object.counterpart_mentions || 0).toLocaleString()}</span></div>
         <div class="tooltip-row"><span class="tooltip-label">Total articles:</span><span class="tooltip-value">${Number(object.total_articles || 0).toLocaleString()}</span></div>
         <div class="tooltip-row"><span class="tooltip-label">Share:</span><span class="tooltip-value">${sharePct}%</span></div>
-        <div class="tooltip-row"><span class="tooltip-label">Ratio:</span><span class="tooltip-value">${ratio}×</span></div>`
+        <div class="tooltip-row"><span class="tooltip-label">Ratio (Ego/Target):</span><span class="tooltip-value">${ratio}</span></div>`
     };
   };
 
