@@ -5,9 +5,9 @@ import { SolidPolygonLayer, GeoJsonLayer, ArcLayer, ScatterplotLayer, IconLayer 
 import NewspaperOverlay from './Newspaper.jsx';
 import BubbleSelector from './BubbleSelector.jsx';
 
-const WORLD_LOCAL_URL = '/world_countries.geojson';
+const WORLD_LOCAL_URL = './world_countries.geojson';
 const WORLD_REMOTE_URL = 'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_countries.geojson';
-const ARC_URL = '/cross_country_mentions_by_year.json';
+const ARC_URL = './cross_country_mentions_by_year.json';
 
 const INITIAL_VIEW_STATE = {
   longitude: 0,
