@@ -357,7 +357,10 @@ export default function App() {
       const weakerCount = winnerIsActive ? otherCount : activeCount;
       const totalArticles = activeCount + otherCount;
       if (totalArticles === 0) continue;
-      const ratio = activeCount / Math.max(otherCount, 1);
+      // egoToPartner = Mentions FROM activeIso TO otherIso
+      // partnerToEgo = Mentions FROM otherIso TO activeIso
+      // The 'activeIso' is our Ego.
+      
       const sourceIso = winnerIsActive ? activeIso : otherIso;
       const targetIso = winnerIsActive ? otherIso : activeIso;
       const sourceRow = winnerIsActive ? activeRow : otherRow;
@@ -366,8 +369,26 @@ export default function App() {
       const targetLabel = pairData.labelIndex.get(targetIso);
       const sourcePosition = sourceRow?.sourcePosition || (sourceLabel ? [sourceLabel.lon, sourceLabel.lat] : null);
       const targetPosition = targetRow?.sourcePosition || (targetLabel ? [targetLabel.lon, targetLabel.lat] : null);
+      
       if (!sourcePosition || !targetPosition) continue;
+      
       const bearing = computeBearing(sourcePosition, targetPosition);
+      
+      // Ratio Logic: Always Ego / Partner
+      // If Ego mentions Partner 100 times, and Partner mentions Ego 10 times.
+      // egoToPartner = 100
+      // partnerToEgo = 10
+      // Ratio = 10.0
+      
+      // If Ego mentions Partner 10 times, and Partner mentions Ego 100 times.
+      // egoToPartner = 10
+      // partnerToEgo = 100
+      // Ratio = 0.1
+      
+      const egoToPartner = activeRow?.mention_occurrences || 0;
+      const partnerToEgo = otherRow?.mention_occurrences || 0;
+      const trueRatio = egoToPartner / Math.max(partnerToEgo, 1);
+
       rows.push({
         year: pairData.year,
         direction: winnerIsActive ? 'outbound' : 'inbound',
@@ -379,8 +400,11 @@ export default function App() {
         targetPosition,
         mention_occurrences: dominantCount,
         counterpart_mentions: weakerCount,
+        // Store raw counts for accurate tooltip and ratio logic
+        ego_mentions: egoToPartner,
+        partner_mentions: partnerToEgo,
         total_articles: totalArticles,
-        ratio,
+        ratio: trueRatio, // Use the Ego/Partner ratio consistently everywhere
         bearing,
         mention_share: dominantShare
       });
@@ -615,16 +639,25 @@ export default function App() {
 
   const deckTooltip = ({ object, layer }) => {
     if (!object || layer?.id !== 'net-arcs') return null;
+    
+    // Use the stored raw counts for tooltip
+    const egoMentions = object.ego_mentions || 0;
+    const partnerMentions = object.partner_mentions || 0;
+    
     const sharePct = ((object.mention_share || 0) * 100).toFixed(2);
     const ratio = object.ratio ? object.ratio.toFixed(2) : '—';
-    const directionLabel = object.direction === 'inbound' ? 'Inbound (others → ego)' : 'Outbound (ego → others)';
+    
+    // Clarify direction for tooltip
+    // "Outbound": Ego -> Others (Ego dominates)
+    // "Inbound": Others -> Ego (Others dominate)
+    // BUT the counts are what matters.
+    
     return {
       html: `
         <div class="tooltip-country">${object.sourceName} → ${object.targetName}</div>
         <div class="tooltip-row"><span class="tooltip-label">Year:</span><span class="tooltip-value">${object.year ?? '—'}</span></div>
-        <div class="tooltip-row"><span class="tooltip-label">${directionLabel}</span></div>
-        <div class="tooltip-row"><span class="tooltip-label">Dominant mentions:</span><span class="tooltip-value">${Number(object.mention_occurrences || 0).toLocaleString()}</span></div>
-        <div class="tooltip-row"><span class="tooltip-label">Counter mentions:</span><span class="tooltip-value">${Number(object.counterpart_mentions || 0).toLocaleString()}</span></div>
+        <div class="tooltip-row"><span class="tooltip-label">Ego mentions Target:</span><span class="tooltip-value">${Number(egoMentions).toLocaleString()}</span></div>
+        <div class="tooltip-row"><span class="tooltip-label">Target mentions Ego:</span><span class="tooltip-value">${Number(partnerMentions).toLocaleString()}</span></div>
         <div class="tooltip-row"><span class="tooltip-label">Total articles:</span><span class="tooltip-value">${Number(object.total_articles || 0).toLocaleString()}</span></div>
         <div class="tooltip-row"><span class="tooltip-label">Share:</span><span class="tooltip-value">${sharePct}%</span></div>
         <div class="tooltip-row"><span class="tooltip-label">Ratio (Ego/Target):</span><span class="tooltip-value">${ratio}</span></div>`
