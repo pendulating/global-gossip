@@ -32,7 +32,7 @@ function FoldedPaper({ headline, subhead }) {
                 color="#1a1a1a"
                 anchorX="center"
                 anchorY="top"
-                font="/fonts/Merriweather-Regular.woff"
+                font="./fonts/Merriweather-Regular.woff"
               >
                 THE GLOBAL TIMES
               </Text>
@@ -51,7 +51,7 @@ function FoldedPaper({ headline, subhead }) {
                 anchorX="center"
                 anchorY="top"
                 lineHeight={1.2}
-                font="/fonts/Merriweather-Regular.woff"
+                font="./fonts/Merriweather-Regular.woff"
               >
                 {headline || "BREAKING NEWS"}
               </Text>
@@ -65,7 +65,7 @@ function FoldedPaper({ headline, subhead }) {
                 textAlign="center"
                 anchorX="center"
                 anchorY="top"
-                font="/fonts/Merriweather-Regular.woff"
+                font="./fonts/Merriweather-Regular.woff"
               >
                 {subhead || "Global analysis reveals new trends in cross-border mentions."}
               </Text>
@@ -81,7 +81,7 @@ function FoldedPaper({ headline, subhead }) {
                    anchorX="center"
                    anchorY="top"
                    lineHeight={1.5}
-                   font="/fonts/Merriweather-Regular.woff"
+                   font="./fonts/Merriweather-Regular.woff"
                  >
                    {"Lorum ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation."}
                  </Text>
@@ -94,7 +94,7 @@ function FoldedPaper({ headline, subhead }) {
                    anchorX="center"
                    anchorY="top"
                    lineHeight={1.5}
-                   font="/fonts/Merriweather-Regular.woff"
+                   font="./fonts/Merriweather-Regular.woff"
                  >
                    {"Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia."}
                  </Text>
@@ -118,7 +118,7 @@ function FoldedPaper({ headline, subhead }) {
                  textAlign="left"
                  anchorX="center"
                  anchorY="top"
-                 font="/fonts/Merriweather-Regular.woff"
+                 font="./fonts/Merriweather-Regular.woff"
                >
                  MARKET WATCH
                </Text>
@@ -131,7 +131,7 @@ function FoldedPaper({ headline, subhead }) {
                    textAlign="justify"
                    anchorX="center"
                    anchorY="top"
-                   font="/fonts/Merriweather-Regular.woff"
+                   font="./fonts/Merriweather-Regular.woff"
                  >
                    {"Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat."}
                  </Text>
@@ -143,7 +143,7 @@ function FoldedPaper({ headline, subhead }) {
                    textAlign="justify"
                    anchorX="center"
                    anchorY="top"
-                   font="/fonts/Merriweather-Regular.woff"
+                   font="./fonts/Merriweather-Regular.woff"
                  >
                    {"Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur."}
                  </Text>
