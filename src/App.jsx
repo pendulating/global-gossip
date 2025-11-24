@@ -70,6 +70,14 @@ export default function App() {
   const [selectedBubbleIso, setSelectedBubbleIso] = useState(null);
   const [isGlobe, setIsGlobe] = useState(false);
   const [arcsVisible, setArcsVisible] = useState(true);
+  const [vizMode, setVizMode] = useState('arcs'); // 'arcs' | 'columns'
+  const [showInfoModal, setShowInfoModal] = useState(false);
+  const [expandedGroups, setExpandedGroups] = useState({
+    blue: true,
+    green: false,
+    purple: false,
+    orange: false
+  });
   const deckRef = useRef(null);
   const timeoutRef = useRef(null);
   const rotationLonRef = useRef(0);
@@ -170,7 +178,7 @@ export default function App() {
                 longitude: label.lon,
                 latitude: label.lat,
                 zoom: 2.0,
-                transitionDuration: 2000,
+                transitionDuration: 800,
                 transitionInterpolator: new FlyToInterpolator(),
                 padding: { bottom: 400 }
             }));
@@ -181,10 +189,10 @@ export default function App() {
                     ...prev,
                     zoom: 1.0,
                     latitude: 20,
-                    transitionDuration: 2000,
+                    transitionDuration: 800,
                     transitionInterpolator: new FlyToInterpolator()
                 }));
-            }, 2200);
+            }, 1000);
         }
     } else {
         if (timeoutRef.current) clearTimeout(timeoutRef.current);
@@ -210,7 +218,7 @@ export default function App() {
     setViewState(prev => ({
       ...prev,
       latitude: 20,
-      zoom: 2.0,
+      zoom: 0.6,
       pitch: 0,
       bearing: 0,
       padding: { bottom: 400 }
@@ -273,6 +281,13 @@ export default function App() {
     const allSourceIsos = new Set();
     const sourceCounts = new Map();
 
+    // First pass to identify all countries that act as sources (Egos)
+    // We need this to differentiate Ego countries from pure Target countries
+    const validEgoSet = new Set();
+    for (const entry of arcData) {
+        if (entry.source_country) validEgoSet.add(entry.source_country.toUpperCase());
+    }
+
     const directionMap = new Map();
     for (const entry of arcData) {
       const entryYear = Number(entry.year);
@@ -289,39 +304,71 @@ export default function App() {
       const sourceLabel = labelIndex.get(sourceIso);
       const targetLabel = labelIndex.get(targetIso);
       if (!sourceLabel || !targetLabel) continue;
-      const row = {
-        year: aggregateAllTime ? 'All years' : entryYear,
-        source_country: sourceIso,
-        target_country: targetIso,
-        sourceName: sourceLabel.name,
-        targetName: targetLabel.name,
-        sourcePosition: [sourceLabel.lon, sourceLabel.lat],
-        targetPosition: [targetLabel.lon, targetLabel.lat],
-        mention_occurrences: mentions,
-        mention_share: Number(entry.mention_share) || 0,
-        article_hits: Number(entry.article_hits) || 0
-      };
+      
+      // Calculate Total Source Mentions for this entry to allow share re-calculation
+      const entryTotalMentions = mentions / (Number(entry.mention_share) || 1);
+
       const key = [sourceIso, targetIso].sort().join('--');
       let record = directionMap.get(key);
       if (!record) {
         record = { isoA: sourceIso < targetIso ? sourceIso : targetIso, isoB: sourceIso < targetIso ? targetIso : sourceIso, rows: {} };
         directionMap.set(key, record);
       }
-      record.rows[sourceIso] = row;
+      
+      if (!record.rows[sourceIso]) {
+          record.rows[sourceIso] = {
+            year: aggregateAllTime ? 'All years' : entryYear,
+            source_country: sourceIso,
+            target_country: targetIso,
+            sourceName: sourceLabel.name,
+            targetName: targetLabel.name,
+            sourcePosition: [sourceLabel.lon, sourceLabel.lat],
+            targetPosition: [targetLabel.lon, targetLabel.lat],
+            mention_occurrences: mentions,
+            article_hits: Number(entry.article_hits) || 0,
+            // Store accumulator for denominator
+            _totalSourceMentions: entryTotalMentions,
+            mention_share: Number(entry.mention_share) || 0
+          };
+      } else {
+          // Aggregate!
+          const existing = record.rows[sourceIso];
+          existing.mention_occurrences += mentions;
+          existing.article_hits += (Number(entry.article_hits) || 0);
+          existing._totalSourceMentions += entryTotalMentions;
+          // Recalculate share
+          existing.mention_share = existing.mention_occurrences / Math.max(existing._totalSourceMentions, 1);
+      }
     }
 
     const pairs = [];
     directionMap.forEach(record => {
       pairs.push(record);
     });
-    return { pairs, year: selectedYear ?? 'All years', labelIndex, allSourceIsos: Array.from(allSourceIsos), sourceCounts };
+    return { pairs, year: selectedYear ?? 'All years', labelIndex, allSourceIsos: Array.from(allSourceIsos), sourceCounts, validEgoSet };
   }, [landData, arcData, arcYears, arcYearIndex, aggregateAllTime, countryLabels]);
 
   const activeIso = selectedBubbleIso;
 
+  const INFO_SVG = (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10"></circle>
+      <line x1="12" y1="16" x2="12" y2="12"></line>
+      <line x1="12" y1="8" x2="12.01" y2="8"></line>
+    </svg>
+  );
+
   // Calculate available countries for bubbles
   const availableCountries = useMemo(() => {
     if (!pairData.allSourceIsos || !pairData.labelIndex) return [];
+    
+    // We want to show ALL countries that appear in the dataset, not just sources?
+    // The previous logic only showed `allSourceIsos`.
+    // If the user wants to visually distinguish "Target only", we might need to include them?
+    // But the BubbleSelector is for SELECTING an Ego. 
+    // You cannot select a pure Target as an Ego because it has no outbound links.
+    // So for the selector, we probably still only want valid Egos.
+    
     return pairData.allSourceIsos
         .map(iso => {
             const label = pairData.labelIndex.get(iso);
@@ -332,7 +379,7 @@ export default function App() {
                 hasLabel: !!label
             };
         })
-        .filter(c => c.hasLabel); // Filter out countries with no map coordinates
+        .filter(c => c.hasLabel); 
   }, [pairData]);
 
   const visibleRows = useMemo(() => {
@@ -429,8 +476,17 @@ export default function App() {
   ];
   
   const PURPLE_COLOR = [147, 51, 234]; // Purple for roughly equal coverage
+  const GREEN_COLOR = [118, 185, 98]; // Green for Ego -> Passive Target
 
-  const colorFromShareRatio = ratio => {
+  const colorFromShareRatio = (ratio, targetIso) => {
+    // Check if target is a "Passive Target" (cannot be an ego)
+    const isPassiveTarget = targetIso && pairData.validEgoSet && !pairData.validEgoSet.has(targetIso);
+    
+    // If it is a passive target, and the ratio indicates Ego dominance (which it usually will, since passive has 0 outbound)
+    // we use Green.
+    // Note: Ratio is Ego/Partner. If Partner has 0 mentions, ratio is huge.
+    if (isPassiveTarget && ratio > 1.0) return GREEN_COLOR;
+
     if (!Number.isFinite(ratio)) return BLUE_COLOR; // Default fallback
     
     if (ratio > 1.5) return BLUE_COLOR;
@@ -440,7 +496,7 @@ export default function App() {
 
   const arcLayer = useMemo(() => {
     // Always render arc layer if we have rows, let the transition prop handle the visual "growth"
-    if (!visibleRows.length) return null;
+    if (!visibleRows.length || vizMode === 'columns') return null;
     return new ArcLayer({
       id: 'net-arcs',
       data: visibleRows,
@@ -449,8 +505,8 @@ export default function App() {
       wrapLongitude: true,
       getSourcePosition: d => d.sourcePosition,
       getTargetPosition: d => d.targetPosition,
-      getSourceColor: d => [...colorFromShareRatio(d.ratio), ARC_FIXED_ALPHA],
-      getTargetColor: d => [...colorFromShareRatio(d.ratio), ARC_FIXED_ALPHA],
+      getSourceColor: d => [...colorFromShareRatio(d.ratio, d.target_country), ARC_FIXED_ALPHA],
+      getTargetColor: d => [...colorFromShareRatio(d.ratio, d.target_country), ARC_FIXED_ALPHA],
       getWidth: d => 1 + Math.log2(d.total_articles + 1),
       pickable: true,
       // Only hide if explicitly told to via arcsVisible, BUT for rapid clicking we might want them shown?
@@ -477,7 +533,7 @@ export default function App() {
   }, [visibleRows, arcsVisible]);
 
   const arcNodeLayer = useMemo(() => {
-    if (!visibleRows.length || !arcsVisible) return null;
+    if (!visibleRows.length || !arcsVisible || vizMode === 'columns') return null;
     const nodeMap = new Map();
     for (const row of visibleRows) {
       const weight = row.mention_occurrences || 0;
@@ -508,7 +564,7 @@ export default function App() {
   }, [visibleRows]);
 
   const arrowLayer = useMemo(() => {
-    if (!visibleRows.length || !arcsVisible) return null;
+    if (!visibleRows.length || !arcsVisible || vizMode === 'columns') return null;
     return new IconLayer({
       id: 'direction-arrows',
       data: visibleRows,
@@ -518,7 +574,7 @@ export default function App() {
       sizeScale: 5000,
       getPosition: d => d.targetPosition,
       getAngle: d => d.bearing,
-      getColor: d => [...colorFromShareRatio(d.ratio), 220],
+      getColor: d => [...colorFromShareRatio(d.ratio, d.target_country), 220],
       parameters: { depthTest: true }
     });
   }, [visibleRows]);
@@ -560,23 +616,79 @@ export default function App() {
 
   const activeCountriesLayer = useMemo(() => {
     if (!landData || !visibleRows.length || !visibleIsos.size || !arcsVisible) return null;
+    
     const features = (landData.features || []).filter(f => {
       const props = f.properties || {};
       const iso = (props.ISO_A2 || props.iso_a2 || props.ISO_A2_EH || '').toUpperCase();
       return iso && visibleIsos.has(iso);
     });
+    
     if (!features.length) return null;
+
+    // Pre-calculate colors and stats map
+    const isoStats = new Map();
+    let maxMentions = 0;
+
+    if (activeIso) isoStats.set(activeIso, { color: [255, 255, 255, 255], count: 0 }); // White for Ego
+
+    for (const row of visibleRows) {
+        const partnerIso = row.source_country === activeIso ? row.target_country : row.source_country;
+        // const baseColor = colorFromShareRatio(row.ratio, row.target_country); // Disabled colored fills per user request
+        const count = row.mention_occurrences || 0;
+        if (count > maxMentions) maxMentions = count;
+        
+        isoStats.set(partnerIso, { 
+            color: [80, 90, 110, 255], // Neutral/Default color
+            count
+        });
+    }
+
+    // Height scale: Max height around 500km-1000km for visibility on globe
+    const MAX_ELEVATION = 1000000; 
+    const elevationScale = maxMentions > 0 ? MAX_ELEVATION / maxMentions : 0;
+
     return new GeoJsonLayer({
       id: 'active-countries',
-      data: { type: 'FeatureCollection', features },
+      data: features,
       coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
       filled: true,
-      stroked: false,
-      getFillColor: ACTIVE_COUNTRY_COLOR,
+      stroked: true,
+      extruded: vizMode === 'columns',
+      wireframe: true,
+      getFillColor: f => {
+         const props = f.properties || {};
+         const iso = (props.ISO_A2 || props.iso_a2 || props.ISO_A2_EH || '').toUpperCase();
+         return isoStats.get(iso)?.color || [80, 90, 110, 255];
+      },
+      getLineColor: [255, 255, 255, 100],
+      getElevation: f => {
+          if (vizMode !== 'columns') return 0;
+          const props = f.properties || {};
+          const iso = (props.ISO_A2 || props.iso_a2 || props.ISO_A2_EH || '').toUpperCase();
+          const count = isoStats.get(iso)?.count || 0;
+          // Use sqrt for better visual distribution of heights
+          return Math.sqrt(count) * (maxMentions > 0 ? MAX_ELEVATION / Math.sqrt(maxMentions) : 0);
+      },
+      lineWidthMinPixels: 1,
       pickable: true,
-      parameters: { depthTest: true }
+      parameters: { depthTest: true },
+      transitions: {
+          getElevation: {
+              duration: 1000,
+              enter: () => 0
+          },
+          getFillColor: {
+              duration: 1000,
+              enter: () => [0, 0, 0, 0]
+          }
+      },
+      updateTriggers: {
+          getFillColor: [activeIso, visibleRows, vizMode],
+          getElevation: [activeIso, visibleRows, vizMode],
+          extruded: [vizMode]
+      }
     });
-  }, [landData, visibleRows, visibleIsos]);
+  }, [landData, visibleRows, visibleIsos, activeIso, pairData.validEgoSet, vizMode]);
 
   const layers = useMemo(
     () => {
@@ -587,7 +699,29 @@ export default function App() {
   );
 
   const deckTooltip = ({ object, layer }) => {
-    if (!object || layer?.id !== 'net-arcs') return null;
+    if (!object) return null;
+    
+    // Handle Active Countries Layer Tooltip
+    if (layer?.id === 'active-countries') {
+        const props = object.properties || {};
+        const iso = (props.ISO_A2 || props.iso_a2 || props.ISO_A2_EH || '').toUpperCase();
+        const name = props.ADMIN || props.NAME || iso;
+        const isEgo = pairData.validEgoSet?.has(iso);
+        
+        let typeLabel = "Global Actor";
+        if (iso === activeIso) typeLabel = "Current Focus (Ego)";
+        else if (!isEgo) typeLabel = "Passive Target (No Articles)";
+        else typeLabel = "Active Source";
+        
+        return {
+            html: `
+            <div style="font-weight:600; font-size:14px">${name}</div>
+            <div style="font-size:12px; color:#aaa; margin-top:2px">${typeLabel}</div>
+            `
+        };
+    }
+
+    if (layer?.id !== 'net-arcs') return null;
     
     // Use the stored raw counts for tooltip
     const egoMentions = object.ego_mentions || 0;
@@ -603,13 +737,13 @@ export default function App() {
     
     return {
       html: `
-        <div class="tooltip-country">${object.sourceName} → ${object.targetName}</div>
-        <div class="tooltip-row"><span class="tooltip-label">Year:</span><span class="tooltip-value">${object.year ?? '—'}</span></div>
-        <div class="tooltip-row"><span class="tooltip-label">Ego mentions Target:</span><span class="tooltip-value">${Number(egoMentions).toLocaleString()}</span></div>
-        <div class="tooltip-row"><span class="tooltip-label">Target mentions Ego:</span><span class="tooltip-value">${Number(partnerMentions).toLocaleString()}</span></div>
-        <div class="tooltip-row"><span class="tooltip-label">Total articles:</span><span class="tooltip-value">${Number(object.total_articles || 0).toLocaleString()}</span></div>
-        <div class="tooltip-row"><span class="tooltip-label">Share:</span><span class="tooltip-value">${sharePct}%</span></div>
-        <div class="tooltip-row"><span class="tooltip-label">Ratio (Ego/Target):</span><span class="tooltip-value">${ratio}</span></div>`
+        <div style="font-weight:600; font-size:14px; margin-bottom:4px; border-bottom:1px solid #444; padding-bottom:4px">${object.sourceName} → ${object.targetName}</div>
+        <div style="display:flex; justify-content:space-between; font-size:12px; margin-bottom:2px"><span style="color:#aaa">Year:</span><span style="color:#eee; margin-left:8px">${object.year ?? '—'}</span></div>
+        <div style="display:flex; justify-content:space-between; font-size:12px; margin-bottom:2px"><span style="color:#aaa">Ego mentions Target:</span><span style="color:#eee; margin-left:8px">${Number(egoMentions).toLocaleString()}</span></div>
+        <div style="display:flex; justify-content:space-between; font-size:12px; margin-bottom:2px"><span style="color:#aaa">Target mentions Ego:</span><span style="color:#eee; margin-left:8px">${Number(partnerMentions).toLocaleString()}</span></div>
+        <div style="display:flex; justify-content:space-between; font-size:12px; margin-bottom:2px"><span style="color:#aaa">Total articles:</span><span style="color:#eee; margin-left:8px">${Number(object.total_articles || 0).toLocaleString()}</span></div>
+        <div style="display:flex; justify-content:space-between; font-size:12px; margin-bottom:2px"><span style="color:#aaa">Share:</span><span style="color:#eee; margin-left:8px">${sharePct}%</span></div>
+        <div style="display:flex; justify-content:space-between; font-size:12px; margin-bottom:2px"><span style="color:#aaa">Ratio (Ego/Target):</span><span style="color:#eee; margin-left:8px">${ratio}</span></div>`
     };
   };
 
@@ -645,40 +779,48 @@ export default function App() {
     if (!activeIso) return null;
     const blue = [];
     const orange = [];
-    const purple = []; // New category for equal coverage
+    const purple = []; 
+    const green = []; // New category for Ego -> Passive Target
+
     for (const row of visibleRows) {
       const isOutbound = row.direction === 'outbound';
       const partnerIso = isOutbound ? row.target_country : row.source_country;
       const partnerName = isOutbound ? row.targetName : row.sourceName;
-      // egoToPartner = Blue = Ego -> Partner mentions
-      // partnerToEgo = Orange = Partner -> Ego mentions
-      // If outbound (ego dominates), mention_occurrences is ego->partner
-      // If inbound (partner dominates), mention_occurrences is partner->ego
+      
       const egoToPartner = isOutbound ? row.mention_occurrences : row.counterpart_mentions;
       const partnerToEgo = isOutbound ? row.counterpart_mentions : row.mention_occurrences;
       
       const ratio = egoToPartner / Math.max(partnerToEgo, 1);
-      const isPurple = ratio >= 0.6666 && ratio <= 1.5;
-
+      const isPassiveTarget = pairData.validEgoSet && !pairData.validEgoSet.has(partnerIso);
+      
       const item = {
         iso: partnerIso,
         name: partnerName,
         egoToPartner,
         partnerToEgo,
         total: egoToPartner + partnerToEgo,
-        isPurple
+        isPassiveTarget
       };
 
-      if (isPurple) purple.push(item);
-      else if (isOutbound) blue.push(item);
-      else orange.push(item);
+      if (isPassiveTarget) {
+          // If partner is passive, it means they CANNOT have significant outbound flow.
+          // So it will almost always be ego-dominated.
+          green.push(item);
+      } else if (ratio >= 0.6666 && ratio <= 1.5) {
+          purple.push(item);
+      } else if (isOutbound) {
+          blue.push(item);
+      } else {
+          orange.push(item);
+      }
     }
     return {
       blue: blue.sort((a, b) => b.egoToPartner - a.egoToPartner).slice(0, 20),
       orange: orange.sort((a, b) => b.partnerToEgo - a.partnerToEgo).slice(0, 20),
-      purple: purple.sort((a, b) => b.total - a.total).slice(0, 20)
+      purple: purple.sort((a, b) => b.total - a.total).slice(0, 20),
+      green: green.sort((a, b) => b.egoToPartner - a.egoToPartner).slice(0, 20)
     };
-  }, [activeIso, visibleRows]);
+  }, [activeIso, visibleRows, pairData.validEgoSet]);
 
   const focusLabel = useMemo(() => {
     if (activeIso) {
@@ -777,16 +919,39 @@ export default function App() {
     if (isGlobe) {
       return new GlobeView({
         id: 'globe',
-        controller: { dragPan: true, scrollZoom: false, touchZoom: false, doubleClickZoom: false, keyboard: false, inertia: 0 },
+        controller: { 
+            dragPan: true, 
+            scrollZoom: { speed: 1.0, smooth: true }, 
+            touchZoom: true, 
+            doubleClickZoom: true, 
+            keyboard: false, 
+            inertia: 100 
+        },
         resolution: 10,
         nearZMultiplier: 0.003,
         farZMultiplier: 30
       });
     }
-    return new MapView({ id: 'map', controller: true, wrapLongitude: true });
+    return new MapView({ 
+        id: 'map', 
+        controller: {
+            dragPan: true,
+            scrollZoom: { speed: 1.0, smooth: true },
+            touchZoom: true,
+            doubleClickZoom: true,
+            keyboard: false,
+            inertia: 100
+        }, 
+        wrapLongitude: true 
+    });
   }, [isGlobe]);
 
   const handleViewStateChange = ({ viewState: vs, interactionState }) => {
+    // Strip transition properties to prevent "fighting" / glitches during interaction
+    // caused by active transitions (e.g. from useEffect) persisting into the drag/zoom state.
+    // This is critical for smooth zooming when hovering interactive elements.
+    const { transitionDuration, transitionInterpolator, transitionEasing, ...rest } = vs;
+
     if (
       interactionState &&
       (interactionState.isDragging ||
@@ -798,18 +963,15 @@ export default function App() {
     }
 
     if (isGlobe) {
-      const nextState = { ...vs };
-      
+      const nextState = { ...rest };
       if (interactionState && interactionState.isDragging) {
           nextState.latitude = 20; 
-          // Maintain current zoom level during drag
       }
-      
       nextState.padding = { bottom: 400 };
-      
       setViewState(nextState);
     } else {
-      setViewState({ ...vs, padding: { bottom: 400 } });
+      // For flat map, ensure we respect the incoming viewState fully to handle cursor-based zoom
+      setViewState({ ...rest, padding: { bottom: 400 } });
     }
   };
 
@@ -828,29 +990,58 @@ export default function App() {
     });
   }, [viewState, modalIso, countryLabels]);
 
-  const newspaperProps = useMemo(() => {
+    const newspaperProps = useMemo(() => {
     if (!leaderboardData || !activeIso) return null;
     // Find the most significant relationship
     const topBlue = leaderboardData.blue[0];
     const topOrange = leaderboardData.orange[0];
+    const topGreen = leaderboardData.green[0];
+
+    // Calculate Top 10 Talked About (Outbound Mentions)
+    // Combine Blue (Ego More), Green (Passive), and Purple (Equal)
+    // We care about who the Ego talks about the most.
+    const allOutbound = [
+        ...leaderboardData.blue,
+        ...leaderboardData.green,
+        ...leaderboardData.purple
+    ].sort((a, b) => b.egoToPartner - a.egoToPartner).slice(0, 8);
     
     let headline = "Global Mentions Analysis";
     let subhead = "Hover over a country to see details";
     let countryName = pairData.labelIndex.get(activeIso)?.name || activeIso;
 
-    if (topBlue) {
+    // Calculate date string for subtitle
+    let dateRange = "";
+    if (aggregateAllTime) {
+        if (arcYears.length > 0) {
+            const minYear = Math.min(...arcYears);
+            const maxYear = Math.max(...arcYears);
+            dateRange = minYear === maxYear ? `${minYear}` : `${minYear}-${maxYear}`;
+        } else {
+            dateRange = "All years";
+        }
+    } else {
+        // If not aggregated, use the current selected year
+        // Note: pairData.year is 'All years' if aggregateAllTime is true, else specific year
+        dateRange = `${pairData.year}`;
+    }
+
+    if (topGreen) {
+      headline = `${countryName.toUpperCase()} TALKS ABOUT ${topGreen.name.toUpperCase()}`;
+      subhead = `${topGreen.egoToPartner.toLocaleString()} times from ${dateRange}!`;
+    } else if (topBlue) {
       headline = `${countryName.toUpperCase()} DISCUSSES ${topBlue.name.toUpperCase()}`;
-      subhead = `Top Outbound Connection (${topBlue.egoToPartner.toLocaleString()} mentions)`;
+      subhead = `${topBlue.egoToPartner.toLocaleString()} times from ${dateRange}!`;
     } else if (topOrange) {
       headline = `${countryName.toUpperCase()} IN THE NEWS`;
-      subhead = `Mentioned by ${topOrange.name} (${topOrange.partnerToEgo.toLocaleString()} times)`;
+      subhead = `${topOrange.partnerToEgo.toLocaleString()} times from ${dateRange}!`;
     } else {
       headline = `${countryName.toUpperCase()} PERSPECTIVE`;
       subhead = "Exploring global connections";
     }
 
-    return { headline, subhead, countryName };
-  }, [leaderboardData, activeIso, pairData]);
+    return { headline, subhead, countryName, topMentions: allOutbound, leaderboardData };
+  }, [leaderboardData, activeIso, pairData, arcYears, aggregateAllTime]);
 
   return (
     <div style={{ width: '100vw', height: '100vh', position: 'relative' }}>
@@ -858,7 +1049,9 @@ export default function App() {
         <NewspaperOverlay 
           headline={newspaperProps.headline} 
           subhead={newspaperProps.subhead} 
-          countryName={newspaperProps.countryName} 
+          countryName={newspaperProps.countryName}
+          topMentions={newspaperProps.topMentions}
+          leaderboardData={newspaperProps.leaderboardData}
         />
       )}
       <DeckGL
@@ -883,6 +1076,72 @@ export default function App() {
             selectedIso={selectedBubbleIso}
             onSelect={setSelectedBubbleIso}
         />
+      )}
+
+      {showInfoModal && (
+        <div style={{
+          position: 'absolute',
+          inset: 0,
+          background: 'rgba(0,0,0,0.7)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 200
+        }} onClick={() => setShowInfoModal(false)}>
+          <div style={{
+            width: 600,
+            maxHeight: '80vh',
+            overflowY: 'auto',
+            background: '#1e293b',
+            border: '1px solid rgba(255,255,255,0.1)',
+            borderRadius: 12,
+            padding: 32,
+            color: '#e2e8f0',
+            position: 'relative',
+            boxShadow: '0 20px 50px rgba(0,0,0,0.5)'
+          }} onClick={e => e.stopPropagation()}>
+            <button 
+              onClick={() => setShowInfoModal(false)}
+              style={{ position: 'absolute', top: 20, right: 20, background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: 24 }}
+            >
+              ×
+            </button>
+            <h2 style={{ marginTop: 0, fontSize: 24, color: '#fff', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: 16 }}>About Global Gossip</h2>
+            
+            <p style={{ lineHeight: 1.6, color: '#cbd5e1', fontSize: 15 }}>
+              <strong>Global Gossip</strong> visualizes the flow of international attention by analyzing millions of news articles. It reveals not just who is talking, but who they are talking <em>about</em>—highlighting the often asymmetrical nature of global discourse.
+            </p>
+
+            <h3 style={{ color: '#fff', marginTop: 24, fontSize: 18 }}>How It Works</h3>
+            <p style={{ lineHeight: 1.6, color: '#cbd5e1', fontSize: 15 }}>
+              We process a massive corpus of global news to extract "Cross-Country Mentions." The core challenge is correctly identifying when a country is mentioned, regardless of the language used in the article.
+            </p>
+
+            <h4 style={{ color: '#e2e8f0', marginTop: 16, fontSize: 16 }}>Multilingual Entity Extraction</h4>
+            <p style={{ lineHeight: 1.6, color: '#cbd5e1', fontSize: 15 }}>
+              To ensure our analysis isn't English-centric, we utilize the <strong>Common Locale Data Repository (CLDR)</strong>. For every "Ego" (source) country, we build a dynamic dictionary that includes:
+            </p>
+            <ul style={{ lineHeight: 1.6, color: '#cbd5e1', paddingLeft: 20, fontSize: 15 }}>
+              <li><strong>Native Names:</strong> The target country's name in the Ego country's primary language(s).</li>
+              <li><strong>Formal & Informal Variants:</strong> e.g., "United States," "USA," "US," "America."</li>
+              <li><strong>Lingua Franca Support:</strong> English names are always included to capture international usages.</li>
+            </ul>
+            <p style={{ lineHeight: 1.6, color: '#cbd5e1', fontSize: 15 }}>
+              We use <code>flashtext</code>, a high-performance keyword search algorithm, to scan articles and count these mentions. This allows us to map, for example, how often French newspapers mention "Allemagne" (Germany) or how often Chinese outlets mention "美国" (USA).
+            </p>
+
+            <h3 style={{ color: '#fff', marginTop: 24, fontSize: 18 }}>Exploration Guide</h3>
+            <p style={{ lineHeight: 1.6, color: '#cbd5e1', fontSize: 15 }}>
+              Use the visualization to explore different types of relationships:
+            </p>
+            <ul style={{ lineHeight: 1.6, color: '#cbd5e1', paddingLeft: 20, fontSize: 15 }}>
+              <li><strong>"Rent Free" (Blue):</strong> Countries the Ego talks about significantly more than they are talked about in return.</li>
+              <li><strong>Reciprocal (Purple):</strong> Balanced relationships where both sides mention each other roughly equally.</li>
+              <li><strong>Passive Targets (Green):</strong> Countries that are frequently mentioned but do not have articles in our dataset (e.g., conflict zones or smaller nations).</li>
+            </ul>
+          </div>
+        </div>
       )}
 
       {hoverModal && (
@@ -928,7 +1187,7 @@ export default function App() {
             position: 'absolute',
             top: 12,
             right: 12,
-            width: 320,
+            width: 380, // Increased from 320
             maxHeight: 'calc(100vh - 24px)',
             display: 'flex',
             flexDirection: 'column',
@@ -962,124 +1221,186 @@ export default function App() {
           <div style={{ overflowY: 'auto', flex: 1, padding: '0 16px 16px' }}>
             {leaderboardData.blue.length > 0 && (
               <div style={{ marginTop: 16 }}>
-                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                 <div 
+                    style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, cursor: 'pointer' }}
+                    onClick={() => setExpandedGroups(prev => ({ ...prev, blue: !prev.blue }))}
+                 >
                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#4494ff' }} />
-                   <div style={{ fontSize: 13, fontWeight: 600, color: '#bfdbfe' }}>
-                     Ego Talks More
+                   <div style={{ fontSize: 13, fontWeight: 600, color: '#bfdbfe', flex: 1 }}>
+                     Countries that live 'rent free' in {pairData.labelIndex.get(activeIso)?.name || activeIso}'s head
                    </div>
+                   <div style={{ fontSize: 10, color: '#64748b' }}>{expandedGroups.blue ? '▼' : '▶'}</div>
                  </div>
-                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                   {leaderboardData.blue.map(item => (
-                     <div key={item.iso} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
-                       {/* Ego Flag (Small) */}
-                       {activeIso.length === 2 && (
-                         <img src={`https://flagcdn.com/w20/${activeIso.toLowerCase()}.png`} alt={activeIso} style={{ width: 20, height: 14, borderRadius: 2, objectFit: 'cover', opacity: 0.8 }} />
-                       )}
-                       
-                       {/* Bar */}
-                       <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                           <div style={{ display: 'flex', height: 6, borderRadius: 3, overflow: 'hidden', background: 'rgba(255,255,255,0.1)' }}>
-                               <div style={{ flex: item.egoToPartner, background: '#4494ff' }} />
-                               <div style={{ flex: item.partnerToEgo, background: '#f97316' }} />
-                           </div>
-                           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, marginTop: 2, color: '#94a3b8', lineHeight: 1 }}>
-                               <span style={{ color: '#93c5fd' }}>{item.egoToPartner.toLocaleString()}</span>
-                               <span style={{ color: '#fdba74' }}>{item.partnerToEgo.toLocaleString()}</span>
-                           </div>
-                       </div>
-
-                       {/* Target Info */}
-                       <div style={{ width: 80, display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
-                           <div style={{ fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'right', maxWidth: 50 }}>{item.name}</div>
-                           {item.iso.length === 2 && (
-                             <img src={`https://flagcdn.com/w20/${item.iso.toLowerCase()}.png`} alt={item.iso} style={{ width: 20, height: 14, borderRadius: 2, objectFit: 'cover' }} />
+                 {expandedGroups.blue && (
+                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                       {leaderboardData.blue.map(item => (
+                         <div key={item.iso} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+                           {/* Ego Flag (Small) */}
+                           {activeIso.length === 2 && (
+                             <img src={`https://flagcdn.com/w20/${activeIso.toLowerCase()}.png`} alt={activeIso} style={{ width: 20, height: 14, borderRadius: 2, objectFit: 'cover', opacity: 0.8 }} />
                            )}
-                       </div>
+                           
+                           {/* Bar */}
+                           <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                               <div style={{ display: 'flex', height: 6, borderRadius: 3, overflow: 'hidden', background: 'rgba(255,255,255,0.1)' }}>
+                                   <div style={{ flex: item.egoToPartner, background: '#4494ff' }} />
+                                   <div style={{ flex: item.partnerToEgo, background: '#f97316' }} />
+                               </div>
+                               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, marginTop: 2, color: '#94a3b8', lineHeight: 1 }}>
+                                   <span style={{ color: '#93c5fd' }}>{item.egoToPartner.toLocaleString()}</span>
+                                   <span style={{ color: '#fdba74' }}>{item.partnerToEgo.toLocaleString()}</span>
+                               </div>
+                           </div>
+
+                           {/* Target Info */}
+                           <div style={{ width: 120, display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
+                               <div style={{ fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'right', maxWidth: 90 }}>{item.name}</div>
+                               {item.iso.length === 2 && (
+                                 <img src={`https://flagcdn.com/w20/${item.iso.toLowerCase()}.png`} alt={item.iso} style={{ width: 20, height: 14, borderRadius: 2, objectFit: 'cover' }} />
+                               )}
+                           </div>
+                         </div>
+                       ))}
                      </div>
-                   ))}
+                 )}
+              </div>
+            )}
+
+            {leaderboardData.green.length > 0 && (
+              <div style={{ marginTop: 16 }}>
+                 <div 
+                    style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, cursor: 'pointer' }}
+                    onClick={() => setExpandedGroups(prev => ({ ...prev, green: !prev.green }))}
+                 >
+                   <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#76b962' }} />
+                   <div style={{ fontSize: 13, fontWeight: 600, color: '#86efac', flex: 1 }}>
+                     Mentions of countries not in dataset
+                   </div>
+                   <div style={{ fontSize: 10, color: '#64748b' }}>{expandedGroups.green ? '▼' : '▶'}</div>
                  </div>
+                 {expandedGroups.green && (
+                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                       {leaderboardData.green.map(item => (
+                         <div key={item.iso} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+                           {activeIso.length === 2 && (
+                             <img src={`https://flagcdn.com/w20/${activeIso.toLowerCase()}.png`} alt={activeIso} style={{ width: 20, height: 14, borderRadius: 2, objectFit: 'cover', opacity: 0.8 }} />
+                           )}
+                           
+                           <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                               <div style={{ display: 'flex', height: 6, borderRadius: 3, overflow: 'hidden', background: 'rgba(255,255,255,0.1)' }}>
+                                   <div style={{ flex: item.egoToPartner, background: '#76b962' }} />
+                                   <div style={{ flex: item.partnerToEgo, background: '#f97316' }} />
+                               </div>
+                               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, marginTop: 2, color: '#94a3b8', lineHeight: 1 }}>
+                                   <span style={{ color: '#86efac' }}>{item.egoToPartner.toLocaleString()}</span>
+                                   <span style={{ color: '#fdba74' }}>{item.partnerToEgo.toLocaleString()}</span>
+                               </div>
+                           </div>
+
+                           <div style={{ width: 80, display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
+                               <div style={{ fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'right', maxWidth: 50 }}>{item.name}</div>
+                               {item.iso.length === 2 && (
+                                 <img src={`https://flagcdn.com/w20/${item.iso.toLowerCase()}.png`} alt={item.iso} style={{ width: 20, height: 14, borderRadius: 2, objectFit: 'cover' }} />
+                               )}
+                           </div>
+                         </div>
+                       ))}
+                     </div>
+                 )}
               </div>
             )}
 
             {leaderboardData.purple.length > 0 && (
               <div style={{ marginTop: 20 }}>
-                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                 <div 
+                    style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, cursor: 'pointer' }}
+                    onClick={() => setExpandedGroups(prev => ({ ...prev, purple: !prev.purple }))}
+                 >
                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#9333ea' }} />
-                   <div style={{ fontSize: 13, fontWeight: 600, color: '#d8b4fe' }}>
+                   <div style={{ fontSize: 13, fontWeight: 600, color: '#d8b4fe', flex: 1 }}>
                      Roughly Equal Coverage
                    </div>
+                   <div style={{ fontSize: 10, color: '#64748b' }}>{expandedGroups.purple ? '▼' : '▶'}</div>
                  </div>
-                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                   {leaderboardData.purple.map(item => (
-                     <div key={item.iso} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
-                       {/* Ego Flag (Small) */}
-                       {activeIso.length === 2 && (
-                         <img src={`https://flagcdn.com/w20/${activeIso.toLowerCase()}.png`} alt={activeIso} style={{ width: 20, height: 14, borderRadius: 2, objectFit: 'cover', opacity: 0.8 }} />
-                       )}
-                       
-                       {/* Bar */}
-                       <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                           <div style={{ display: 'flex', height: 6, borderRadius: 3, overflow: 'hidden', background: 'rgba(255,255,255,0.1)' }}>
-                               <div style={{ flex: item.egoToPartner, background: '#9333ea' }} />
-                               <div style={{ flex: item.partnerToEgo, background: '#9333ea' }} />
-                           </div>
-                           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, marginTop: 2, color: '#94a3b8', lineHeight: 1 }}>
-                               <span style={{ color: '#d8b4fe' }}>{item.egoToPartner.toLocaleString()}</span>
-                               <span style={{ color: '#d8b4fe' }}>{item.partnerToEgo.toLocaleString()}</span>
-                           </div>
-                       </div>
-
-                       {/* Target Info */}
-                       <div style={{ width: 80, display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
-                           <div style={{ fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'right', maxWidth: 50 }}>{item.name}</div>
-                           {item.iso.length === 2 && (
-                             <img src={`https://flagcdn.com/w20/${item.iso.toLowerCase()}.png`} alt={item.iso} style={{ width: 20, height: 14, borderRadius: 2, objectFit: 'cover' }} />
+                 {expandedGroups.purple && (
+                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                       {leaderboardData.purple.map(item => (
+                         <div key={item.iso} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+                           {/* Ego Flag (Small) */}
+                           {activeIso.length === 2 && (
+                             <img src={`https://flagcdn.com/w20/${activeIso.toLowerCase()}.png`} alt={activeIso} style={{ width: 20, height: 14, borderRadius: 2, objectFit: 'cover', opacity: 0.8 }} />
                            )}
-                       </div>
+                           
+                           {/* Bar */}
+                           <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                               <div style={{ display: 'flex', height: 6, borderRadius: 3, overflow: 'hidden', background: 'rgba(255,255,255,0.1)' }}>
+                                   <div style={{ flex: item.egoToPartner, background: '#9333ea' }} />
+                                   <div style={{ flex: item.partnerToEgo, background: '#9333ea' }} />
+                               </div>
+                               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, marginTop: 2, color: '#94a3b8', lineHeight: 1 }}>
+                                   <span style={{ color: '#d8b4fe' }}>{item.egoToPartner.toLocaleString()}</span>
+                                   <span style={{ color: '#d8b4fe' }}>{item.partnerToEgo.toLocaleString()}</span>
+                               </div>
+                           </div>
+
+                           {/* Target Info */}
+                           <div style={{ width: 120, display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
+                               <div style={{ fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'right', maxWidth: 90 }}>{item.name}</div>
+                               {item.iso.length === 2 && (
+                                 <img src={`https://flagcdn.com/w20/${item.iso.toLowerCase()}.png`} alt={item.iso} style={{ width: 20, height: 14, borderRadius: 2, objectFit: 'cover' }} />
+                               )}
+                           </div>
+                         </div>
+                       ))}
                      </div>
-                   ))}
-                 </div>
+                 )}
               </div>
             )}
 
             {leaderboardData.orange.length > 0 && (
               <div style={{ marginTop: 20 }}>
-                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                 <div 
+                    style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, cursor: 'pointer' }}
+                    onClick={() => setExpandedGroups(prev => ({ ...prev, orange: !prev.orange }))}
+                 >
                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#f97316' }} />
-                   <div style={{ fontSize: 13, fontWeight: 600, color: '#fdba74' }}>
-                     Target Talks More
+                   <div style={{ fontSize: 13, fontWeight: 600, color: '#fdba74', flex: 1 }}>
+                     {pairData.labelIndex.get(activeIso)?.name || activeIso} lives 'rent free' in these countries' heads
                    </div>
+                   <div style={{ fontSize: 10, color: '#64748b' }}>{expandedGroups.orange ? '▼' : '▶'}</div>
                  </div>
-                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                   {leaderboardData.orange.map(item => (
-                     <div key={item.iso} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
-                       {/* Ego Flag (Small) */}
-                       {activeIso.length === 2 && (
-                         <img src={`https://flagcdn.com/w20/${activeIso.toLowerCase()}.png`} alt={activeIso} style={{ width: 20, height: 14, borderRadius: 2, objectFit: 'cover', opacity: 0.8 }} />
-                       )}
-                       
-                       {/* Bar */}
-                       <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-                           <div style={{ display: 'flex', height: 6, borderRadius: 3, overflow: 'hidden', background: 'rgba(255,255,255,0.1)' }}>
-                               <div style={{ flex: item.egoToPartner, background: '#4494ff' }} />
-                               <div style={{ flex: item.partnerToEgo, background: '#f97316' }} />
-                           </div>
-                           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, marginTop: 2, color: '#94a3b8', lineHeight: 1 }}>
-                               <span style={{ color: '#93c5fd' }}>{item.egoToPartner.toLocaleString()}</span>
-                               <span style={{ color: '#fdba74' }}>{item.partnerToEgo.toLocaleString()}</span>
-                           </div>
-                       </div>
-
-                       {/* Target Info */}
-                       <div style={{ width: 80, display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
-                           <div style={{ fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'right', maxWidth: 50 }}>{item.name}</div>
-                           {item.iso.length === 2 && (
-                             <img src={`https://flagcdn.com/w20/${item.iso.toLowerCase()}.png`} alt={item.iso} style={{ width: 20, height: 14, borderRadius: 2, objectFit: 'cover' }} />
+                 {expandedGroups.orange && (
+                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                       {leaderboardData.orange.map(item => (
+                         <div key={item.iso} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+                           {/* Ego Flag (Small) */}
+                           {activeIso.length === 2 && (
+                             <img src={`https://flagcdn.com/w20/${activeIso.toLowerCase()}.png`} alt={activeIso} style={{ width: 20, height: 14, borderRadius: 2, objectFit: 'cover', opacity: 0.8 }} />
                            )}
-                       </div>
+                           
+                           {/* Bar */}
+                           <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                               <div style={{ display: 'flex', height: 6, borderRadius: 3, overflow: 'hidden', background: 'rgba(255,255,255,0.1)' }}>
+                                   <div style={{ flex: item.egoToPartner, background: '#4494ff' }} />
+                                   <div style={{ flex: item.partnerToEgo, background: '#f97316' }} />
+                               </div>
+                               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, marginTop: 2, color: '#94a3b8', lineHeight: 1 }}>
+                                   <span style={{ color: '#93c5fd' }}>{item.egoToPartner.toLocaleString()}</span>
+                                   <span style={{ color: '#fdba74' }}>{item.partnerToEgo.toLocaleString()}</span>
+                               </div>
+                           </div>
+
+                           {/* Target Info */}
+                           <div style={{ width: 120, display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
+                               <div style={{ fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'right', maxWidth: 90 }}>{item.name}</div>
+                               {item.iso.length === 2 && (
+                                 <img src={`https://flagcdn.com/w20/${item.iso.toLowerCase()}.png`} alt={item.iso} style={{ width: 20, height: 14, borderRadius: 2, objectFit: 'cover' }} />
+                               )}
+                           </div>
+                         </div>
+                       ))}
                      </div>
-                   ))}
-                 </div>
+                 )}
               </div>
             )}
 
@@ -1093,7 +1414,25 @@ export default function App() {
       )}
 
       <div style={{ position: 'absolute', top: 12, left: 12, width: 280, padding: '12px', background: 'rgba(15,23,42,0.85)', borderRadius: 10, border: '1px solid rgba(255,255,255,0.1)', color: '#e2e8f0', fontSize: 13 }}>
-        <div style={{ fontSize: 12, color: '#94a3b8' }}>Focus country</div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <div style={{ fontSize: 12, color: '#94a3b8' }}>Focus country</div>
+            <button
+                onClick={() => setShowInfoModal(true)}
+                style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: '#94a3b8',
+                    cursor: 'pointer',
+                    padding: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                }}
+                title="About this visualization"
+            >
+                {INFO_SVG}
+            </button>
+        </div>
         <div style={{ marginTop: 4, fontSize: 16, fontWeight: 600, color: '#AFC7FF' }}>{focusLabel}</div>
         <div style={{ marginTop: 6, fontSize: 11, color: '#94a3b8' }}>Hover to preview connections, click to pin/unpin.</div>
 
@@ -1131,6 +1470,43 @@ export default function App() {
               Globe
             </button>
         </div>
+
+        {/* Viz Mode Toggle - Hidden for now
+        <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(255,255,255,0.05)', borderRadius: 8, padding: 4 }}>
+            <button
+              onClick={() => setVizMode('arcs')}
+              style={{
+                flex: 1,
+                padding: '6px 0',
+                borderRadius: 6,
+                border: 'none',
+                background: vizMode === 'arcs' ? 'rgba(68,148,255,0.2)' : 'transparent',
+                color: vizMode === 'arcs' ? '#60a5fa' : '#94a3b8',
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: 'pointer'
+              }}
+            >
+              Arcs
+            </button>
+            <button
+              onClick={() => setVizMode('columns')}
+              style={{
+                flex: 1,
+                padding: '6px 0',
+                borderRadius: 6,
+                border: 'none',
+                background: vizMode === 'columns' ? 'rgba(68,148,255,0.2)' : 'transparent',
+                color: vizMode === 'columns' ? '#60a5fa' : '#94a3b8',
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: 'pointer'
+              }}
+            >
+              Columns
+            </button>
+        </div>
+        */}
 
         <label style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#cbd5e1' }}>
           <input type="checkbox" checked={aggregateAllTime} onChange={e => setAggregateAllTime(e.target.checked)} />
@@ -1182,8 +1558,12 @@ export default function App() {
         <div style={{ marginTop: 16, fontSize: 12, color: '#94a3b8' }}>Legend</div>
         <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ width: 18, height: 6, borderRadius: 9999, background: 'linear-gradient(90deg, rgba(118,185,98,0.4), rgba(118,185,98,1))' }} />
+            <span style={{ fontSize: 12, color: '#cbd5e1' }}>Target mentioned, but not in dataset</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span style={{ width: 18, height: 6, borderRadius: 9999, background: 'linear-gradient(90deg, rgba(249,115,22,0.4), rgba(249,115,22,1))' }} />
-            <span style={{ fontSize: 12, color: '#cbd5e1' }}>Target talks more</span>
+            <span style={{ fontSize: 12, color: '#cbd5e1' }}>Target mentions ego more</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span style={{ width: 18, height: 6, borderRadius: 9999, background: 'linear-gradient(90deg, rgba(147,51,234,0.4), rgba(147,51,234,1))' }} />
@@ -1191,7 +1571,7 @@ export default function App() {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span style={{ width: 18, height: 6, borderRadius: 9999, background: 'linear-gradient(90deg, rgba(68,148,255,0.4), rgba(68,148,255,1))' }} />
-            <span style={{ fontSize: 12, color: '#cbd5e1' }}>Ego talks more</span>
+            <span style={{ fontSize: 12, color: '#cbd5e1' }}>Ego mentions target more</span>
           </div>
         </div>
       </div>

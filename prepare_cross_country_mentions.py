@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import argparse
 import json
+import os
 import re
 import sys
 import unicodedata
@@ -48,6 +49,41 @@ MANUAL_SYNONYMS: dict[str, list[str]] = {
     "VN": ["vietnam", "viet nam"],
 }
 
+# Keywords to strictly exclude because they are common stopwords in major languages
+# or highly ambiguous.
+BLOCKED_KEYWORDS: set[str] = {
+    # English stopwords / Common words
+    "us", "it", "in", "an", "at", "as", "be", "by", "do", "go", "he", "if", "is", 
+    "me", "my", "no", "of", "on", "or", "so", "to", "up", "we", "am", 
+    
+    # Common 3-letter ISO code collisions (CRITICAL for data quality)
+    "can",  # Canada vs 'can'
+    "and",  # Andorra vs 'and'
+    "are",  # UAE vs 'are'
+    "nor",  # Norway vs 'nor'
+    "per",  # Peru vs 'per'
+    "pan",  # Panama vs 'pan'
+    "arm",  # Armenia vs 'arm'
+    "jam",  # Jamaica vs 'jam'
+    "man",  # Isle of Man vs 'man'
+    "vat",  # Holy See vs 'vat'
+    "gin",  # Guinea vs 'gin'
+    "guy",  # Guyana vs 'guy'
+    "lie",  # Liechtenstein vs 'lie'
+    "sur",  # Suriname vs 'sur' (esp in Romance languages)
+    "ton",  # Tonga vs 'ton'
+    
+    # Romance languages stopwords (un=a/one, eu=I, etc.)
+    "un", "eu", "lo", "la", "el", "en", "et", "es",
+    
+    # Geographic ambiguities (Isle of Man, Jersey, Reunion are often just words)
+    "jersey", "reunion", "christmas island", "ascension island"
+}
+
+# Whitelist of short aliases that are generally safe/distinct enough to keep
+SAFE_SHORT_ALIASES: set[str] = {
+    "uk", "nz", "hk", "uae", "usa", "prc", "roc", "drc", "car"
+}
 
 @dataclass(frozen=True)
 class CountryAlias:
@@ -58,15 +94,38 @@ class CountryAlias:
 
 
 def normalize_text(value: str | None) -> str:
-    """Lower-case text, remove accents, and collapse whitespace."""
-
+    """
+    Normalize text for keyword matching across multiple scripts (Latin, Cyrillic, Arabic, etc.).
+    
+    Steps:
+    1. NFKD normalization (decomposes characters).
+    2. Strip combining diacritics (accents, vowel marks) to unify variations (e.g. 'café' -> 'cafe').
+    3. Lowercase.
+    4. Replace hyphens with spaces.
+    5. Keep only word characters (letters/numbers from any script) and spaces/dots.
+    """
     if not isinstance(value, str):
         return ""
+        
+    # 1. Decompose (e.g. 'é' -> 'e' + combining acute)
     text = unicodedata.normalize("NFKD", value)
-    text = text.encode("ascii", "ignore").decode("ascii")
+    
+    # 2. Strip combining characters (Category Mn/Mc/Me usually, checking combining class > 0)
+    # This removes Latin accents, Hebrew/Arabic vowel points, etc.
+    text = "".join(c for c in text if not unicodedata.combining(c))
+    
+    # 3. Lowercase
     text = text.lower()
+    
+    # 4. Separators
     text = text.replace("-", " ")
-    text = re.sub(r"[^a-z0-9\.\s]", " ", text)
+    
+    # 5. Strip punctuation/symbols but keep letters/numbers from all scripts
+    # \w matches [a-zA-Z0-9_] plus Unicode letters/ideographs.
+    # We keep dots as they appear in acronyms (U.S.A.), though sometimes we might want to strip them.
+    text = re.sub(r"[^\w\s\.]", " ", text)
+    
+    # 6. Collapse whitespace
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
@@ -117,6 +176,8 @@ def build_alias_records(country_codes: Iterable[str]) -> list[CountryAlias]:
 def build_keyword_processor(alias_table: pd.DataFrame) -> KeywordProcessor:
     processor = KeywordProcessor(case_sensitive=False)
     for row in alias_table.itertuples():
+        if row.normalized_alias in BLOCKED_KEYWORDS:
+            continue
         processor.add_keyword(row.normalized_alias, row.country_code)
     return processor
 
@@ -128,9 +189,268 @@ def count_country_mentions(normalized_text: str, keyword_processor: KeywordProce
     return Counter(matches)
 
 
+def load_cldr_data() -> tuple[dict[str, list[str]], dict[str, dict[str, str]]]:
+    """
+    Load CLDR data to map countries to languages and languages to country names.
+    Returns:
+        country_to_langs: Map from country code (e.g. 'FR') to list of languages (e.g. ['fr', 'en']).
+        lang_to_names: Map from language (e.g. 'fr') to dict of {TargetCountryCode: Name}.
+    """
+    print("Loading CLDR data...")
+    country_to_langs: dict[str, list[str]] = {}
+    lang_to_names: dict[str, dict[str, str]] = {}
+    
+    # Path to cldr-core within cldr directory
+    territory_info_path = PROJECT_ROOT / "cldr/cldr-core/supplemental/territoryInfo.json"
+    if not territory_info_path.exists():
+        # Fallback to checking root if cldr folder structure varies
+        territory_info_path = PROJECT_ROOT / "cldr-core/supplemental/territoryInfo.json"
+        
+    if not territory_info_path.exists():
+        print(f"Warning: CLDR data not found at {territory_info_path}. Using defaults.")
+        return {}, {}
+        
+    with open(territory_info_path, 'r') as f:
+        t_info = json.load(f)
+        
+    territory_info = t_info.get("supplemental", {}).get("territoryInfo", {})
+    
+    for country_code, info in territory_info.items():
+        langs = info.get("languagePopulation", {})
+        if not langs:
+            continue
+            
+        selected_langs = []
+        for lang_code, lang_data in langs.items():
+            status = lang_data.get("_officialStatus")
+            pop_str = lang_data.get("_populationPercent", "0")
+            try:
+                pop = float(pop_str)
+            except ValueError:
+                pop = 0.0
+                
+            # Criteria: Official status OR significant population (>5%)
+            if status in ("official", "de_facto_official", "official_regional") or pop >= 5.0:
+                # Normalize lang code: replace '_' with '-' to match directory names
+                norm_lang = lang_code.replace('_', '-')
+                selected_langs.append((pop, norm_lang))
+        
+        # If no languages selected (rare), take the most populous one
+        if not selected_langs:
+            best_lang = None
+            max_pop = -1.0
+            for lang_code, lang_data in langs.items():
+                pop_str = lang_data.get("_populationPercent", "0")
+                try:
+                    pop = float(pop_str)
+                except ValueError:
+                    pop = 0.0
+                if pop > max_pop:
+                    max_pop = pop
+                    best_lang = lang_code
+            if best_lang:
+                selected_langs.append((max_pop, best_lang.replace('_', '-')))
+
+        # Sort by population desc
+        selected_langs.sort(key=lambda x: x[0], reverse=True)
+        country_to_langs[country_code] = [lang for _, lang in selected_langs]
+            
+    # Collect all unique languages needed
+    unique_langs = set()
+    for langs in country_to_langs.values():
+        unique_langs.update(langs)
+        
+    print(f"Mapped {len(country_to_langs)} countries to {len(unique_langs)} unique languages.")
+    
+    # Load names for each language
+    locales_dir = PROJECT_ROOT / "cldr/cldr-localenames-full/main"
+    if not locales_dir.exists():
+         locales_dir = PROJECT_ROOT / "cldr-localenames-full/main"
+         
+    if not locales_dir.exists():
+         print(f"Warning: CLDR locales not found at {locales_dir}")
+         return country_to_langs, {}
+         
+    avail_langs = set(os.listdir(locales_dir))
+    
+    for lang in unique_langs:
+        # Try exact match first
+        target_lang = lang
+        if target_lang not in avail_langs:
+            # Try base lang (fr-BE -> fr) if exact not found
+            if '-' in target_lang:
+                base = target_lang.split('-')[0]
+                if base in avail_langs:
+                    target_lang = base
+                else:
+                    # Try finding any variant? e.g. if 'uz-Arab' requested but only 'uz' exists (unlikely, usually other way around)
+                    # or if 'en' requested but only 'en-US' exists (also unlikely)
+                    continue
+            else:
+                continue
+        
+        # Avoid reloading if we mapped multiple requests to same base lang
+        if target_lang in lang_to_names:
+            # Store the alias pointer? 
+            # Ideally lang_to_names keys should match what's in country_to_langs values
+            # So if we mapped 'fr-BE' -> 'fr', we should store lang_to_names['fr-BE'] = data_from_fr
+            lang_to_names[lang] = lang_to_names[target_lang]
+            continue
+
+        path = locales_dir / target_lang / "territories.json"
+        if not path.exists():
+            continue
+            
+        try:
+            with open(path, 'r') as f:
+                data = json.load(f)
+            main_data = data.get("main", {})
+            if not main_data:
+                continue
+            # Key is usually the lang code
+            inner_key = list(main_data.keys())[0]
+            territories = main_data[inner_key].get("localeDisplayNames", {}).get("territories", {})
+            if territories:
+                lang_to_names[lang] = territories
+                # Also store under the target_lang key if different
+                if target_lang != lang:
+                    lang_to_names[target_lang] = territories
+        except Exception as e:
+            print(f"Error loading CLDR for {lang}: {e}")
+            
+    print(f"Loaded CLDR names for {len(lang_to_names)} languages.")
+    return country_to_langs, lang_to_names
+
+
+def get_universal_aliases(country_codes: Iterable[str]) -> list[tuple[str, str]]:
+    """
+    Get universal aliases like Alpha-3 codes that apply across all languages.
+    Returns list of (alias, country_code).
+    """
+    aliases = []
+    for code in country_codes:
+        country = pycountry.countries.get(alpha_2=code)
+        if country is None:
+            continue
+        if hasattr(country, "alpha_3"):
+            aliases.append((country.alpha_3, code))
+    return aliases
+
+
+def build_country_processors(
+    country_codes: list[str],
+    country_to_langs: dict[str, list[str]],
+    lang_to_names: dict[str, dict[str, str]],
+    default_keyword_processor: KeywordProcessor,
+) -> dict[str, KeywordProcessor]:
+    print("Pre-computing keyword processors for all source countries...")
+    
+    universal_aliases = get_universal_aliases(country_codes)
+    
+    # Cache processors by language-signature to save memory/time
+    signature_to_processor: dict[tuple[str, ...], KeywordProcessor] = {}
+    country_processors: dict[str, KeywordProcessor] = {}
+    
+    for source in tqdm(country_codes, desc="Building processors"):
+        langs = country_to_langs.get(source, [])
+        sig = tuple(langs)
+        
+        if sig in signature_to_processor:
+            country_processors[source] = signature_to_processor[sig]
+            continue
+            
+        # If no langs, use default (which has English + Universal + Manual)
+        if not langs:
+            country_processors[source] = default_keyword_processor
+            signature_to_processor[sig] = default_keyword_processor
+            continue
+            
+        kp = KeywordProcessor(case_sensitive=False)
+        
+        # 1. Universal
+        for alias, code in universal_aliases:
+            # Alpha-3 codes are usually 3 chars and safe, but check blocklist anyway
+            if alias.lower() not in BLOCKED_KEYWORDS:
+                kp.add_keyword(alias, code)
+        
+        # 2. Manual
+        for code, synonyms in MANUAL_SYNONYMS.items():
+            for syn in synonyms:
+                if syn.lower() not in BLOCKED_KEYWORDS:
+                    kp.add_keyword(syn, code)
+        
+        # 3. CLDR
+        langs_processed = 0
+        for lang in langs:
+            if lang in lang_to_names:
+                langs_processed += 1
+                for key, name in lang_to_names[lang].items():
+                     if "-alt-" in key:
+                        code = key.split("-")[0]
+                     else:
+                        code = key
+                    
+                     if len(code) == 2: 
+                         norm = normalize_text(name)
+                         if not norm:
+                             continue
+                             
+                         # CRITICAL: Filter short/stopword aliases
+                         if len(norm) < 2:
+                             continue
+                         if len(norm) == 2 and norm not in SAFE_SHORT_ALIASES:
+                             continue
+                         if norm in BLOCKED_KEYWORDS:
+                             continue
+                             
+                         kp.add_keyword(norm, code)
+                         
+        # 4. ALWAYS Include English/Default Names (Lingua Franca fallback)
+        # This ensures that even if we are processing Russian articles, "USA" or "Germany" (in English) matches.
+        # We extract keywords from the default processor (which contains English CLDR + Universal + Manual)
+        default_keywords = default_keyword_processor.get_all_keywords()
+        for alias, code in default_keywords.items():
+            # Deduplication is handled by flashtext (overwrite or ignore? add_keyword overwrites by default)
+            kp.add_keyword(alias, code)
+
+        if langs_processed == 0:
+             # If no native languages found, we are effectively just using the English set we just added.
+             # To match the caching logic, we can just return the specific kp (which is now English-enriched).
+             pass
+        
+        country_processors[source] = kp
+        signature_to_processor[sig] = kp
+             
+    return country_processors
+
+
+def export_dictionary_csv(country_processors: dict[str, KeywordProcessor], output_path: Path) -> None:
+    """Exports the full dictionary of (source_country, alias, target_country) to CSV."""
+    print(f"Exporting mention dictionary to {output_path}...")
+    records = []
+    for source_country, processor in tqdm(country_processors.items(), desc="Exporting dictionary"):
+        # get_all_keywords() returns {normalized_alias: clean_name (target_code)}
+        # Note: flashtext 2.7 returns a dict.
+        all_keywords = processor.get_all_keywords()
+        for alias, target_code in all_keywords.items():
+             records.append({
+                 "source_country": source_country,
+                 "alias": alias,
+                 "target_country": target_code
+             })
+             
+    if not records:
+        print("Warning: Dictionary is empty!")
+        return
+
+    df = pd.DataFrame(records)
+    df.to_csv(output_path, index=False)
+    print(f"✓ Saved dictionary with {len(df)} entries to {output_path}")
+
+
 def aggregate_mentions(
     data_path: Path,
-    keyword_processor: KeywordProcessor,
+    country_processors: dict[str, KeywordProcessor],
     country_names: dict[str, str],
     debug_fraction: float | None = None,
     random_seed: int = 42,
@@ -141,7 +461,7 @@ def aggregate_mentions(
     )
     country_codes = sorted(country_series.unique().tolist())
     country_set = set(country_codes)
-
+    
     occurrence_counts: dict[str, Counter[str]] = defaultdict(Counter)
     article_hit_counts: dict[str, Counter[str]] = defaultdict(Counter)
     occurrence_counts_by_year: dict[str, dict[int, Counter[str]]] = defaultdict(lambda: defaultdict(Counter))
@@ -178,7 +498,14 @@ def aggregate_mentions(
                 articles_seen_by_year[source][year_value] += 1
 
             normalized = normalize_text(row.article_text)
-            mention_counts = count_country_mentions(normalized, keyword_processor)
+            
+            # Select processor based on source country
+            processor = country_processors.get(source)
+            if not processor:
+                # Should not happen if country_processors built correctly for all codes
+                continue
+            
+            mention_counts = count_country_mentions(normalized, processor)
             mention_counts.pop(source, None)
             if not mention_counts:
                 continue
@@ -286,19 +613,36 @@ def prepare_data(
     country_codes = sorted(country_series.unique().tolist())
     country_names = {code: pycountry.countries.get(alpha_2=code).name for code in country_codes}
 
+    # Load CLDR data for better name matching
+    country_to_langs, lang_to_names = load_cldr_data()
+
+    # Build fallback/English processor
     alias_df = pd.DataFrame(
         [
             {"country_code": alias.country_code, "raw_alias": alias.raw_alias, "normalized_alias": alias.normalized_alias}
             for alias in build_alias_records(country_codes)
         ]
     )
-    print(f"Prepared {len(alias_df)} aliases across {len(country_codes)} source countries.")
+    print(f"Prepared {len(alias_df)} default (English) aliases across {len(country_codes)} source countries.")
 
-    keyword_processor = build_keyword_processor(alias_df)
+    default_keyword_processor = build_keyword_processor(alias_df)
+
+    # Pre-compute processors per country
+    country_processors = build_country_processors(
+        country_codes=country_codes,
+        country_to_langs=country_to_langs,
+        lang_to_names=lang_to_names,
+        default_keyword_processor=default_keyword_processor,
+    )
+    
+    # Export dictionary
+    output_dir.mkdir(parents=True, exist_ok=True)
+    dictionary_csv_path = output_dir / "country_mention_dictionary.csv"
+    export_dictionary_csv(country_processors, dictionary_csv_path)
 
     mentions_df, mentions_by_year_df = aggregate_mentions(
         data_path=input_path,
-        keyword_processor=keyword_processor,
+        country_processors=country_processors,
         country_names=country_names,
         debug_fraction=debug_fraction,
         random_seed=random_seed,
@@ -375,4 +719,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
