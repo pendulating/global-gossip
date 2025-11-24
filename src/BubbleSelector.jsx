@@ -1,7 +1,19 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 
 export default function BubbleSelector({ countries, selectedIso, onSelect }) {
   const [hoveredIso, setHoveredIso] = useState(null);
+  const [windowSize, setWindowSize] = useState({ 
+    width: typeof window !== 'undefined' ? window.innerWidth : 1200,
+    height: typeof window !== 'undefined' ? window.innerHeight : 800
+  });
+
+  useEffect(() => {
+    const handleResize = () => {
+      setWindowSize({ width: window.innerWidth, height: window.innerHeight });
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   // Sort by count descending so largest/most important are in the center
   const sortedCountries = useMemo(() => {
@@ -9,9 +21,33 @@ export default function BubbleSelector({ countries, selectedIso, onSelect }) {
   }, [countries]);
 
   const count = sortedCountries.length;
-  const containerSize = 450;
+  
+  // Responsive sizing logic
+  const isMobile = windowSize.width < 768; // Tablet/Mobile
+  const isSmallLaptop = windowSize.width < 1280 && windowSize.height < 800;
+  
+  // Base size reduced further to 300 to be very compact
+  const baseSize = 300;
+  
+  // Responsive scaling
+  // - Mobile (< 768): Smallest
+  // - Small Laptop (< 1280): Compact
+  // - Standard Laptop (1360x768 etc): Current "perfect" size (0.9 scale)
+  // - Large Screen (> 1600): Larger
+  const isLargeScreen = windowSize.width > 1600;
+  
+  const scaleRatio = isMobile 
+    ? 0.55 
+    : (isSmallLaptop 
+        ? 0.75 
+        : (isLargeScreen ? 1.3 : 0.9)
+      );
+      
+  const containerSize = baseSize * scaleRatio;
+  
   const radius = containerSize / 2;
-  const padding = 25;
+  // Minimal padding
+  const padding = 5 * scaleRatio;
 
   // Generate Hex Grid Points (normalized distance 1)
   const hexPoints = useMemo(() => {
@@ -84,10 +120,11 @@ export default function BubbleSelector({ countries, selectedIso, onSelect }) {
     const denom = spacingFactor * maxDist + 0.5;
     let D = R_avail / denom;
     
-    // Clamp sizes
-    D = Math.max(20, Math.min(75, D));
+    // Clamp sizes - reduced max size further
+    D = Math.max(12, Math.min(50, D));
     
-    const Scale = D * spacingFactor;
+    // Tighter spacing factor - touching or slight overlap is fine for organic look
+    const Scale = D * 0.95;
     
     return { bubbleSize: D, scale: Scale };
   }, [hexPoints, radius]);
@@ -103,6 +140,12 @@ export default function BubbleSelector({ countries, selectedIso, onSelect }) {
     });
   }, [sortedCountries, hexPoints, radius, scale]);
 
+  // Helper to find hovered country object for display
+  const hoveredCountry = useMemo(() => {
+    if (!hoveredIso) return null;
+    return countries.find(c => c.iso === hoveredIso);
+  }, [hoveredIso, countries]);
+
   return (
     <div style={{
       position: 'absolute',
@@ -116,7 +159,35 @@ export default function BubbleSelector({ countries, selectedIso, onSelect }) {
       border: '1px solid rgba(255, 255, 255, 0.15)',
       boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
       zIndex: 60,
+      transformOrigin: 'bottom left', 
+      transition: 'width 0.3s ease, height 0.3s ease'
     }}>
+      {/* Hover Modal / Tooltip */}
+      {hoveredCountry && (
+        <div style={{
+            position: 'absolute',
+            top: -40,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            background: 'rgba(15, 23, 42, 0.95)',
+            border: '1px solid rgba(255, 255, 255, 0.2)',
+            padding: '8px 16px',
+            borderRadius: 8,
+            color: '#fff',
+            fontSize: 14,
+            fontWeight: 600,
+            whiteSpace: 'nowrap',
+            zIndex: 100,
+            boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+            pointerEvents: 'none'
+        }}>
+            {hoveredCountry.name}
+            <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2, textAlign: 'center' }}>
+                {hoveredCountry.count ? `${hoveredCountry.count.toLocaleString()} mentions` : ''}
+            </div>
+        </div>
+      )}
+
       <div style={{ position: 'relative', width: '100%', height: '100%' }}>
         {bubbles.map((country) => {
           const isSelected = selectedIso === country.iso;

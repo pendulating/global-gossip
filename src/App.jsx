@@ -1090,13 +1090,13 @@ export default function App() {
           zIndex: 200
         }} onClick={() => setShowInfoModal(false)}>
           <div style={{
-            width: 600,
+            width: size.width < 768 ? '90%' : 600,
             maxHeight: '80vh',
             overflowY: 'auto',
             background: '#1e293b',
             border: '1px solid rgba(255,255,255,0.1)',
             borderRadius: 12,
-            padding: 32,
+            padding: size.width < 768 ? 20 : 32,
             color: '#e2e8f0',
             position: 'relative',
             boxShadow: '0 20px 50px rgba(0,0,0,0.5)'
@@ -1200,7 +1200,7 @@ export default function App() {
             position: 'absolute',
             top: 12,
             right: 12,
-            width: 380, // Increased from 320
+            width: size.width < 768 ? 'calc(100vw - 24px)' : (size.width < 1024 ? 300 : 380),
             maxHeight: 'calc(100vh - 24px)',
             display: 'flex',
             flexDirection: 'column',
@@ -1210,7 +1210,8 @@ export default function App() {
             border: '1px solid rgba(255, 255, 255, 0.1)',
             color: '#e2e8f0',
             boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)',
-            zIndex: 50
+            zIndex: 50,
+            transition: 'width 0.3s ease'
           }}
         >
           <div style={{ padding: '16px 16px 12px', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
@@ -1426,7 +1427,22 @@ export default function App() {
         </div>
       )}
 
-      <div style={{ position: 'absolute', top: 12, left: 12, width: 280, padding: '12px', background: 'rgba(15,23,42,0.85)', borderRadius: 10, border: '1px solid rgba(255,255,255,0.1)', color: '#e2e8f0', fontSize: 13 }}>
+      <div style={{ 
+        position: 'absolute', 
+        top: 12, 
+        left: 12, 
+        width: size.width < 1024 ? 240 : 280, 
+        maxHeight: 'calc(100vh - 150px)', // Leave room for BubbleSelector
+        overflowY: 'auto',
+        scrollbarWidth: 'thin', // Firefox
+        padding: '12px', 
+        background: 'rgba(15, 23, 42, 0.85)', 
+        borderRadius: 10, 
+        border: '1px solid rgba(255,255,255,0.1)', 
+        color: '#e2e8f0', 
+        fontSize: 13,
+        transition: 'width 0.3s ease'
+      }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div style={{ fontSize: 12, color: '#94a3b8' }}>Focus country</div>
             <button
@@ -1447,8 +1463,7 @@ export default function App() {
             </button>
         </div>
         <div style={{ marginTop: 4, fontSize: 16, fontWeight: 600, color: '#AFC7FF' }}>{focusLabel}</div>
-        <div style={{ marginTop: 6, fontSize: 11, color: '#94a3b8' }}>Hover to preview connections, click to pin/unpin.</div>
-
+        
         <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(255,255,255,0.05)', borderRadius: 8, padding: 4 }}>
             <button
               onClick={() => setIsGlobe(false)}

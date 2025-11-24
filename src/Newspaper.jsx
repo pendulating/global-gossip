@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useRef } from 'react';
+import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Text, Environment, Float, ContactShadows, Image } from '@react-three/drei';
 import * as THREE from 'three';
@@ -141,7 +141,7 @@ function PaperSheet({ color = "#f4f1ea", position = [0, 0, 0], rotation = [0, 0,
   );
 }
 
-function FoldedPaper({ headline, subhead, countryName, topMentions, leaderboardData, isDraggingRef }) {
+function FoldedPaper({ headline, subhead, countryName, topMentions, leaderboardData, isDraggingRef, hasMovedRef }) {
   const [isOpen, setIsOpen] = useState(false);
   const groupRef = useRef();
   const leftPanelRef = useRef();
@@ -184,7 +184,8 @@ function FoldedPaper({ headline, subhead, countryName, topMentions, leaderboardD
   }, []);
 
   const toggleOpen = (e) => {
-    if (isDraggingRef?.current) return; // Prevent toggle if dragging
+    // Prevent toggle if actively dragging OR if a drag movement just finished (click + drag)
+    if (isDraggingRef?.current || hasMovedRef?.current) return; 
     e.stopPropagation();
     setIsOpen(s => !s);
   };
@@ -394,7 +395,24 @@ function FoldedPaper({ headline, subhead, countryName, topMentions, leaderboardD
 
 export default function NewspaperOverlay({ headline, subhead, countryName, topMentions, leaderboardData }) {
   const [position, setPosition] = useState({ x: 0, y: 0 });
+  const [size, setSize] = useState({ 
+    width: typeof window !== 'undefined' ? Math.min(800, window.innerWidth * 0.9) : 800,
+    height: typeof window !== 'undefined' ? Math.min(600, window.innerHeight * 0.8) : 600
+  });
+
+  useEffect(() => {
+    const handleResize = () => {
+      setSize({
+        width: Math.min(800, window.innerWidth * 0.9),
+        height: Math.min(600, window.innerHeight * 0.8)
+      });
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   const isDragging = useRef(false);
+  const hasMoved = useRef(false); // Track if movement exceeded threshold
   const dragStart = useRef({ x: 0, y: 0 });
   const initialPos = useRef({ x: 0, y: 0 });
 
@@ -403,15 +421,19 @@ export default function NewspaperOverlay({ headline, subhead, countryName, topMe
     // But wait, RaycastManager sets pointerEvents: auto on the canvas when hovering a mesh.
     // So if we get an event here, it bubbled from the canvas, so we are clicking the newspaper.
     isDragging.current = true;
+    hasMoved.current = false;
     dragStart.current = { x: e.clientX, y: e.clientY };
     initialPos.current = { ...position };
     
     const handlePointerMove = (moveEvent) => {
       if (!isDragging.current) return;
       const dx = moveEvent.clientX - dragStart.current.x;
-      const dy = moveEvent.clientY - dragStart.current.y; // Note: positive y is down in DOM, up in CSS transform usually... 
-      // Actually transform translate(x, y) moves element down for +y.
-      // coordinate system matches screen.
+      const dy = moveEvent.clientY - dragStart.current.y;
+      
+      // If moved more than 3 pixels, consider it a drag
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+          hasMoved.current = true;
+      }
       
       setPosition({
         x: initialPos.current.x + dx,
@@ -424,10 +446,10 @@ export default function NewspaperOverlay({ headline, subhead, countryName, topMe
       window.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('pointerup', handlePointerUp);
       
-      // Small timeout to allow the click event to fire/be suppressed in children if needed
+      // Reset hasMoved after a short delay so the click event (which fires after mouseup) can see it
       setTimeout(() => {
-          // Reset logic if needed
-      }, 50);
+          hasMoved.current = false;
+      }, 100);
     };
 
     window.addEventListener('pointermove', handlePointerMove);
@@ -443,8 +465,8 @@ export default function NewspaperOverlay({ headline, subhead, countryName, topMe
       left: '50%', 
       // Apply drag translation on top of centering
       transform: `translate(calc(-50% + ${position.x}px), ${position.y}px)`, 
-      width: '800px', 
-      height: '600px', 
+      width: size.width, 
+      height: size.height, 
       pointerEvents: 'none', // Container ignores clicks, but children (Canvas) can capture and bubble
       zIndex: 50,
       // Ensure the container itself doesn't block if pointer-events: auto happens
@@ -482,7 +504,7 @@ export default function NewspaperOverlay({ headline, subhead, countryName, topMe
         <spotLight position={[5, 5, 5]} angle={0.3} penumbra={0.5} intensity={1} castShadow />
         <pointLight position={[-5, 0, 5]} intensity={0.5} />
         <RaycastManager />
-        <FoldedPaper isDraggingRef={isDragging} headline={headline} subhead={subhead} countryName={countryName} topMentions={topMentions} leaderboardData={leaderboardData} />
+        <FoldedPaper isDraggingRef={isDragging} hasMovedRef={hasMoved} headline={headline} subhead={subhead} countryName={countryName} topMentions={topMentions} leaderboardData={leaderboardData} />
         <Environment preset="city" />
       </Canvas>
     </div>
