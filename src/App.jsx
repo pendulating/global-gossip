@@ -1110,7 +1110,7 @@ export default function App() {
             <h2 style={{ marginTop: 0, fontSize: 24, color: '#fff', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: 16 }}>About Global Gossip</h2>
             
             <p style={{ lineHeight: 1.6, color: '#cbd5e1', fontSize: 15 }}>
-              <strong>Global Gossip</strong> visualizes the flow of international attention by analyzing millions of news articles. It reveals not just who is talking, but who they are talking <em>about</em>—highlighting the often asymmetrical nature of global discourse.
+              <strong>Global Gossip</strong> visualizes the flow of international attention by analyzing <strong>415,000 news articles from 55 countries</strong>, courtesy of Nokia Bell Labs Cambridge's Responsible AI Group. The articles are randomly sampled from digital news providers. It reveals not just who is talking, but who they are talking <em>about</em>—highlighting the often asymmetrical nature of global discourse.
             </p>
 
             <h3 style={{ color: '#fff', marginTop: 24, fontSize: 18 }}>How It Works</h3>
@@ -1139,6 +1139,19 @@ export default function App() {
               <li><strong>"Rent Free" (Blue):</strong> Countries the Ego talks about significantly more than they are talked about in return.</li>
               <li><strong>Reciprocal (Purple):</strong> Balanced relationships where both sides mention each other roughly equally.</li>
               <li><strong>Passive Targets (Green):</strong> Countries that are frequently mentioned but do not have articles in our dataset (e.g., conflict zones or smaller nations).</li>
+            </ul>
+
+            <h3 style={{ color: '#fff', marginTop: 24, fontSize: 18 }}>Sample Questions You Can Answer</h3>
+            <p style={{ lineHeight: 1.6, color: '#cbd5e1', fontSize: 15, marginBottom: 12 }}>
+              Here are some example analyses you can explore with this tool:
+            </p>
+            <ul style={{ lineHeight: 1.6, color: '#cbd5e1', paddingLeft: 20, fontSize: 15 }}>
+              <li><strong>Media Attention Patterns:</strong> Which countries dominate news coverage in different regions? Select a country and see who they talk about most.</li>
+              <li><strong>Asymmetric Relationships:</strong> Find countries that receive disproportionate attention (e.g., does Country A mention Country B far more than Country B mentions Country A?).</li>
+              <li><strong>Regional Focus:</strong> Do countries focus more on their neighbors or on global superpowers? Compare mentions of nearby countries vs. distant major powers.</li>
+              <li><strong>Temporal Trends:</strong> Use the year slider to see how international attention shifts over time—which relationships strengthen or weaken?</li>
+              <li><strong>Cultural Proximity:</strong> Explore whether countries with shared languages or colonial histories mention each other more frequently.</li>
+              <li><strong>Reciprocal Dialogue:</strong> Find pairs of countries with balanced, two-way coverage (purple arcs), indicating mutual interest or engagement.</li>
             </ul>
           </div>
         </div>
